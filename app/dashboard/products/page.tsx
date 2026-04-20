@@ -67,7 +67,7 @@ async function fetchEcoProducts(token: string): Promise<EcoProduct[]> {
   let url: string | null = `${base}/products?per_page=100`;
   let pages = 0;
   while (url && pages < 20) {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+    const res = await fetch(url as string, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
     const data = await res.json();
     all = [...all, ...(data.data || [])];
     url = data.links?.next || null;
