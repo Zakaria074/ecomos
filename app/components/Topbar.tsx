@@ -1,6 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -15,6 +16,7 @@ const pageTitles: Record<string, string> = {
 
 export default function Topbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const title = pageTitles[pathname] || "EcomOS";
 
   const today = new Date().toLocaleDateString("fr-DZ", {
@@ -23,6 +25,12 @@ export default function Topbar() {
     month: "long",
     day: "numeric",
   });
+
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
   return (
     <header className="h-14 bg-white border-b border-gray-100 flex items-center px-6 gap-4">
@@ -37,6 +45,12 @@ export default function Topbar() {
         🔔
         <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full"></div>
       </div>
+      <button
+        onClick={handleLogout}
+        className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
+      >
+        Déconnexion
+      </button>
     </header>
   );
 }
