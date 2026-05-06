@@ -15,191 +15,246 @@ const DHD_TOKENS: Record<string, string | undefined> = {
   GYMFORCE: process.env.NEXT_PUBLIC_DHD_TOKEN_GYMFORCE,
 };
 
-interface DhdStats { expedies: number; en_livraison: number; livres: number; retours: number; }
+interface DhdStats { expedies: number; en_livraison: number; }
+interface AdSpend { tiktok: number; meta: number; total: number; results: number; cpr: number; }
+interface TopCampaign { name: string; results: number; cpr: number; source: string; }
 
-function getDay(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() - offset);
-  return d.toISOString().split("T")[0];
-}
+function getToday() { return new Date().toISOString().split("T")[0]; }
 
-async function fetchDhdStats(token: string, dateFrom: string, dateTo: string): Promise<DhdStats> {
+async function fetchDhdStats(token: string): Promise<DhdStats> {
   const base = "https://platform.dhd-dz.com";
-  let expedies = 0, en_livraison = 0, livres = 0, retours = 0;
-  let page = 1;
-  let hasMore = true;
+  const today = getToday();
+  let expedies = 0, en_livraison = 0;
+  let page = 1, hasMore = true;
   while (hasMore) {
     try {
-const res = await fetch(
-  `${base}/api/v1/get/orders?api_token=${token}&page=${page}&start_date=${dateFrom}&end_date=${dateTo}`,
-  { headers: { Accept: "application/json" } }
-);
+      const res = await fetch(`${base}/api/v1/get/orders?api_token=${token}&page=${page}&start_date=${today}&end_date=${today}`, { headers: { Accept: "application/json" } });
       const data = await res.json();
       const orders = data.data || [];
       if (orders.length === 0) { hasMore = false; break; }
       for (const o of orders) {
         const s = o.status || "";
         expedies++;
-        if (s === "en_livraison") en_livraison++;
-        else if (["livre_non_encaisse", "encaisse_non_paye", "paiements_prets", "paye_et_archive"].includes(s)) livres++;
-        else if (["retour_chez_livreur", "retour_transit_entrepot", "retour_en_traitement", "retour_recu", "retour_archive"].includes(s)) retours++;
+        if (["en_ramassage","vers_hub","vers_station","en_station","vers_wilaya","en_preparation","en_livraison"].includes(s)) en_livraison++;
       }
       hasMore = !!data.next_page_url;
       page++;
     } catch { hasMore = false; }
   }
-  return { expedies, en_livraison, livres, retours };
+  return { expedies, en_livraison };
+}
+
+async function fetchAllShopsStats(): Promise<DhdStats> {
+  const results = await Promise.all(SHOPS.map(async (shop) => {
+    const token = DHD_TOKENS[shop.key];
+    if (!token) return { expedies: 0, en_livraison: 0 };
+    return fetchDhdStats(token);
+  }));
+  return results.reduce((all, s) => ({ expedies: all.expedies + s.expedies, en_livraison: all.en_livraison + s.en_livraison }), { expedies: 0, en_livraison: 0 });
+}
+
+async function fetchAdSpend(): Promise<{ spend: AdSpend; topCampaigns: TopCampaign[] }> {
+  const today = getToday();
+  let tiktok = 0, meta = 0, totalResults = 0;
+  const allCampaigns: TopCampaign[] = [];
+  try {
+    const res = await fetch(`/api/tiktok?date_from=${today}&date_to=${today}`);
+    const data = await res.json();
+    tiktok = parseFloat(data.summary?.spend || "0");
+    totalResults += parseInt(data.summary?.conversions || "0");
+    for (const c of (data.campaigns || [])) {
+      const cpr = parseFloat(c.cpc || "0");
+      const results = parseInt(c.conversions || "0");
+      if (results > 0 && cpr > 0) allCampaigns.push({ name: c.campaign_name, results, cpr, source: "TikTok" });
+    }
+  } catch {}
+  try {
+    const res = await fetch(`/api/meta?date_from=${today}&date_to=${today}`);
+    const metaData: any[] = await res.json();
+    for (const acc of metaData) {
+      meta += parseFloat(acc.summary?.spend || "0");
+      const accResults = acc.summary?.actions?.find((a: any) => ["purchase","omni_purchase","offsite_conversion.fb_pixel_purchase"].includes(a.action_type));
+      totalResults += parseInt(accResults?.value || "0");
+      for (const c of (acc.campaigns || [])) {
+        const spend = parseFloat(c.spend || "0");
+        const results = parseInt(c.actions?.find((a: any) => ["purchase","omni_purchase","offsite_conversion.fb_pixel_purchase"].includes(a.action_type))?.value || "0");
+        const cpr = results > 0 ? spend / results : 0;
+        if (results > 0 && cpr > 0) allCampaigns.push({ name: c.campaign_name, results, cpr, source: "Meta" });
+      }
+    }
+  } catch {}
+  const total = tiktok + meta;
+  const cpr = totalResults > 0 ? total / totalResults : 0;
+  return { spend: { tiktok, meta, total, results: totalResults, cpr }, topCampaigns: allCampaigns.sort((a, b) => a.cpr - b.cpr).slice(0, 3) };
 }
 
 export default function DashboardPage() {
-  const today = getDay(0);
-  const yesterday = getDay(1);
-  const last7 = getDay(6);
-  const PRESETS = [
-    { label: "Today", from: today, to: today },
-    { label: "Yesterday", from: yesterday, to: yesterday },
-    { label: "Last 7 days", from: last7, to: today },
-  ];
-
-  const [shop, setShop] = useState("GYMFORCE");
-  const [dhd, setDhd] = useState<DhdStats>({ expedies: 0, en_livraison: 0, livres: 0, retours: 0 });
+  const [stats, setStats] = useState<DhdStats>({ expedies: 0, en_livraison: 0 });
+  const [adSpend, setAdSpend] = useState<AdSpend>({ tiktok: 0, meta: 0, total: 0, results: 0, cpr: 0 });
+  const [topCampaigns, setTopCampaigns] = useState<TopCampaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateFrom, setDateFrom] = useState(today);
-  const [dateTo, setDateTo] = useState(today);
-  const [appliedFrom, setAppliedFrom] = useState(today);
-  const [appliedTo, setAppliedTo] = useState(today);
-  const [activePreset, setActivePreset] = useState("Today");
+  const [lastUpdated, setLastUpdated] = useState("");
 
-  useEffect(() => {
-    const dhdToken = DHD_TOKENS[shop];
-    if (!dhdToken) return;
+  const loadData = () => {
     setLoading(true);
-    fetchDhdStats(dhdToken, appliedFrom, appliedTo).then((dhdData) => {
-      setDhd(dhdData);
+    Promise.all([fetchAllShopsStats(), fetchAdSpend()]).then(([dhdData, spendData]) => {
+      setStats(dhdData);
+      setAdSpend(spendData.spend);
+      setTopCampaigns(spendData.topCampaigns);
+      setLastUpdated(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
       setLoading(false);
     });
-  }, [shop, appliedFrom, appliedTo]);
-
-  const applyPreset = (p: typeof PRESETS[0]) => {
-    setDateFrom(p.from); setDateTo(p.to);
-    setAppliedFrom(p.from); setAppliedTo(p.to);
-    setActivePreset(p.label);
   };
 
-  const handleValider = () => {
-    const diff = Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 864e5);
-    if (diff > 7) { alert("Maximum 7 jours"); return; }
-    setAppliedFrom(dateFrom); setAppliedTo(dateTo);
-    setActivePreset("");
-  };
+  useEffect(() => { loadData(); }, []);
 
-  const dhdKpis = [
-    { label: "Expédiés", value: dhd.expedies, color: "text-violet-600", border: "border-violet-100", icon: "🚀" },
-    { label: "En livraison", value: dhd.en_livraison, color: "text-cyan-600", border: "border-cyan-100", icon: "🛵" },
-    { label: "Livrés", value: dhd.livres, color: "text-green-600", border: "border-green-100", icon: "✅" },
-    { label: "Retours", value: dhd.retours, color: "text-orange-500", border: "border-orange-100", icon: "↩️" },
-  ];
+  const costPerExpedie = stats.expedies > 0 ? adSpend.total / stats.expedies : 0;
+  const todayLabel = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 pb-8">
+
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pt-1">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Vue d'ensemble</h2>
-          <p className="text-sm text-gray-400 mt-0.5">ECOTRACK — temps réel</p>
+          <h2 className="text-xl font-black text-gray-900">Vue d'ensemble</h2>
+          <p className="text-xs text-gray-400 capitalize mt-0.5">{todayLabel}{lastUpdated && ` · ${lastUpdated}`}</p>
         </div>
-        <div className="flex gap-2">
-          {SHOPS.map(s => (
-            <button key={s.key} onClick={() => setShop(s.key)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-sm ${
-                shop === s.key ? "bg-purple-600 text-white shadow-purple-200"
-                : "bg-white border border-gray-200 text-gray-500 hover:border-purple-200 hover:text-purple-600"
-              }`}>{s.name}</button>
-          ))}
-        </div>
+        <button onClick={loadData} disabled={loading}
+          className="w-9 h-9 rounded-2xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-all active:scale-95">
+          <span className={`text-base ${loading ? "animate-spin" : ""}`}>🔄</span>
+        </button>
       </div>
 
-      {/* Filtres */}
-      <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex-wrap">
-        <div className="flex gap-2">
-          {PRESETS.map(p => (
-            <button key={p.label} onClick={() => applyPreset(p)}
-              className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
-                activePreset === p.label ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
-              }`}>{p.label}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400" />
-          <span className="text-gray-400">→</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400" />
-          <button onClick={handleValider}
-            className="px-5 py-2 rounded-xl text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-all">
-            Valider
-          </button>
-        </div>
+      {/* Quick Links */}
+      <div className="grid grid-cols-3 gap-2">
+        <a href="https://platform.dhd-dz.com/home" target="_blank" rel="noreferrer"
+          className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-2xl px-3 py-2.5 hover:bg-orange-100 transition-all active:scale-95">
+          <span className="text-base">🚛</span>
+          <span className="text-xs font-bold text-orange-600">DHD</span>
+        </a>
+        <a href="https://lekidi09.ecomanager.dz/fr/dash" target="_blank" rel="noreferrer"
+          className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-2xl px-3 py-2.5 hover:bg-blue-100 transition-all active:scale-95">
+          <span className="text-base">🛒</span>
+          <span className="text-xs font-bold text-blue-600">Ecomanager</span>
+        </a>
+        <Link href="/dashboard/calculator"
+          className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-2xl px-3 py-2.5 hover:bg-green-100 transition-all active:scale-95">
+          <span className="text-base">🧮</span>
+          <span className="text-xs font-bold text-green-600">Profit Calc</span>
+        </Link>
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center h-64 gap-3">
-          <div className="w-8 h-8 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-gray-400 text-sm">Chargement des données...</p>
+        <div className="flex flex-col items-center justify-center h-56 gap-3">
+          <div className="w-7 h-7 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-gray-400 text-xs">Chargement...</p>
         </div>
       ) : (
         <>
-          {/* ECOTRACK KPIs */}
+          {/* Livraison */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-2 h-2 rounded-full bg-orange-400"></div>
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">ECOTRACK — Livraison</span>
-            </div>
-            <div className="grid grid-cols-4 gap-3">
-              {dhdKpis.map(kpi => (
-                <div key={kpi.label} className={`bg-white border ${kpi.border} rounded-2xl p-4 shadow-sm hover:shadow-md transition-all`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{kpi.label}</span>
-                    <span className="text-base">{kpi.icon}</span>
-                  </div>
-                  <div className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 inline-block"></span>
+              Livraison aujourd'hui
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total</span>
+                  <span className="text-sm">📦</span>
                 </div>
-              ))}
+                <div className="text-3xl font-black text-violet-600">{stats.expedies}</div>
+                <div className="text-xs text-gray-400 mt-1">Prêt + Expédiés</div>
+              </div>
+              <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Expédiés</span>
+                  <span className="text-sm">🚀</span>
+                </div>
+                <div className="text-3xl font-black text-cyan-600">{stats.en_livraison}</div>
+                <div className="text-xs text-gray-400 mt-1">En livraison</div>
+              </div>
             </div>
           </div>
 
-          {/* Bottom */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Top produits — placeholder */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-lg">🏆</span>
-                <span className="text-sm font-semibold text-gray-900">Top produits</span>
+          {/* Ads */}
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block"></span>
+              Publicités aujourd'hui
+            </p>
+            <div className="bg-gray-950 rounded-2xl p-4 shadow-lg">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Combined</span>
+                <Link href="/dashboard/performance" className="text-xs text-purple-400 font-semibold">Détails →</Link>
               </div>
-              <div className="flex flex-col items-center justify-center py-8 gap-3">
-                <span className="text-3xl">📊</span>
-                <p className="text-xs text-gray-400 text-center">Connexion Facebook Ads<br/>à venir</p>
-                <span className="px-3 py-1 bg-blue-50 text-blue-500 text-xs rounded-lg font-medium">Bientôt disponible</span>
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">Spend</div>
+                  <div className="text-xl font-black text-white">${adSpend.total.toFixed(0)}</div>
+                  <div className="flex gap-1 mt-1.5 flex-wrap">
+                    <span className="text-xs bg-pink-950 text-pink-400 px-1.5 py-0.5 rounded-lg font-bold">TK ${adSpend.tiktok.toFixed(0)}</span>
+                    <span className="text-xs bg-blue-950 text-blue-400 px-1.5 py-0.5 rounded-lg font-bold">FB ${adSpend.meta.toFixed(0)}</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">Results</div>
+                  <div className="text-xl font-black text-green-400">{adSpend.results}</div>
+                  <div className="text-xs text-gray-600 mt-1">conversions</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">CPR</div>
+                  <div className="text-xl font-black text-purple-400">${adSpend.cpr.toFixed(2)}</div>
+                  <div className="text-xs text-gray-600 mt-1">par résultat</div>
+                </div>
+              </div>
+              <div className="h-px bg-gray-800 mb-3"></div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Cost / Expédié</div>
+                  <div className="text-xs text-gray-700 mt-0.5">${adSpend.total.toFixed(0)} ÷ {stats.expedies} colis</div>
+                </div>
+                <div className="text-2xl font-black text-yellow-400">${costPerExpedie.toFixed(2)}</div>
               </div>
             </div>
+          </div>
 
-            {/* Today Ad Spend — placeholder */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">💸</span>
-                  <span className="text-sm font-semibold text-gray-900">Today Ad Spend</span>
+          {/* Top Campagnes */}
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block"></span>
+              Top campagnes — meilleur CPR
+            </p>
+            <div className="bg-white rounded-2xl border border-gray-100 p-3 shadow-sm">
+              {topCampaigns.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 gap-2">
+                  <span className="text-2xl">📊</span>
+                  <p className="text-xs text-gray-400">Aucune conversion aujourd'hui</p>
                 </div>
-                <Link href="/dashboard/products"
-                  className="text-xs text-purple-500 hover:text-purple-700 font-medium transition-colors">
-                  Voir détails →
-                </Link>
-              </div>
-              <div className="flex flex-col items-center justify-center py-4 gap-2">
-                <p className="text-4xl font-bold text-gray-200">$0</p>
-                <p className="text-xs text-gray-400 text-center">Meta & TikTok Ads<br/>à connecter</p>
-                <span className="px-3 py-1 bg-orange-50 text-orange-500 text-xs rounded-lg font-medium">Non connecté</span>
-              </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {topCampaigns.map((c, i) => (
+                    <div key={i} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${
+                          i === 0 ? "bg-yellow-100 text-yellow-600" :
+                          i === 1 ? "bg-gray-200 text-gray-600" :
+                          "bg-orange-100 text-orange-500"
+                        }`}>{i + 1}</div>
+                        <div>
+                          <p className="text-xs font-bold text-gray-800 max-w-[130px] truncate">{c.name}</p>
+                          <span className={`text-xs font-semibold ${c.source === "TikTok" ? "text-pink-500" : "text-blue-500"}`}>{c.source}</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-black text-green-600">{c.results} ventes</p>
+                        <p className="text-xs text-gray-400">${c.cpr.toFixed(2)} CPR</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </>

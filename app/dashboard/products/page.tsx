@@ -213,7 +213,7 @@ export default function ProductsAdSpendPage() {
         const token = TOKENS[s.key];
         if (!token) continue;
         const prods = await fetchEcoProducts(token);
-        prods.filter(p => (p.available_stock || 0) > 10).forEach(p => {
+        prods.forEach(p => {
           allProducts.push({
             title: p.title,
             sku: p.variants?.[0]?.sku || "—",
@@ -222,7 +222,12 @@ export default function ProductsAdSpendPage() {
         });
       }
 
-      allProducts.sort((a, b) => b.stock - a.stock);
+      allProducts.sort((a, b) => {
+  const aHasStock = a.stock > 0 ? 0 : 1;
+  const bHasStock = b.stock > 0 ? 0 : 1;
+  if (aHasStock !== bHasStock) return aHasStock - bHasStock;
+  return a.sku.localeCompare(b.sku);
+});
 
       const today = new Date().toLocaleDateString("fr-DZ", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
       const totalOk = allProducts.filter(p => p.stock > 30).length;
@@ -287,7 +292,7 @@ export default function ProductsAdSpendPage() {
         const token = TOKENS[s.key];
         if (!token) continue;
         const prods = await fetchEcoProducts(token);
-        prods.filter(p => (p.available_stock || 0) > 10).forEach(p => {
+        prods.forEach(p => {
           allProducts.push({
             title: p.title,
             sku: p.variants?.[0]?.sku || "—",
@@ -296,7 +301,12 @@ export default function ProductsAdSpendPage() {
         });
       }
 
-      allProducts.sort((a, b) => b.stock - a.stock);
+      allProducts.sort((a, b) => {
+  const aHasStock = a.stock > 0 ? 0 : 1;
+  const bHasStock = b.stock > 0 ? 0 : 1;
+  if (aHasStock !== bHasStock) return aHasStock - bHasStock;
+  return a.sku.localeCompare(b.sku);
+});
 
       const today = new Date().toLocaleDateString("fr-DZ", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
       const totalOk = allProducts.filter(p => p.stock > 30).length;
@@ -328,13 +338,7 @@ export default function ProductsAdSpendPage() {
       }).join("");
 
       // مكان كتابة Net Profit يدوياً
-      const extraBlock = `
-        <div style="display:flex;align-items:center;gap:8mm;margin-bottom:6mm;padding:4mm 6mm;background:#f3f0ff;border-radius:12px;border:1px solid #ddd6fe">
-          <div style="font-size:12px;font-weight:700;color:#7c3aed;white-space:nowrap">Net Profit :</div>
-          <div style="flex:1;border-bottom:2px solid #7c3aed;height:24px"></div>
-          <div style="font-size:11px;color:#9ca3af;white-space:nowrap">DZD</div>
-        </div>
-      `;
+      const extraBlock = ``;
 
       const html = buildPDF(
         "Rapport de Profit",
