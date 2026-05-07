@@ -78,6 +78,7 @@ function getDay(offset = 0) {
 const PRESETS = [
   { label: "Today", from: getDay(0), to: getDay(0) },
   { label: "Yesterday", from: getDay(1), to: getDay(1) },
+  { label: "Last 3 days", from: getDay(3), to: getDay(1) },
   { label: "Last 7 days", from: getDay(6), to: getDay(0) },
 ];
 
@@ -110,6 +111,7 @@ export default function PerformancePage() {
   const [sortKey, setSortKey] = useState<SortKey>("spend");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [activeTab, setActiveTab] = useState<TabView>("all");
+  const [activeAccount, setActiveAccount] = useState<string | null>(null);
 
   const fetchAll = async (from: string, to: string) => {
     setLoadingMeta(true);
@@ -161,21 +163,29 @@ export default function PerformancePage() {
   const applyPreset = (p: typeof PRESETS[0]) => {
     setDateFrom(p.from); setDateTo(p.to);
     setActivePreset(p.label);
+    setActiveAccount(null);
     fetchAll(p.from, p.to);
   };
 
-  const handleValider = () => { setActivePreset(""); fetchAll(dateFrom, dateTo); };
+  const handleValider = () => { setActivePreset(""); setActiveAccount(null); fetchAll(dateFrom, dateTo); };
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const filteredRows = rows.filter(r => {
-    if (activeTab === "meta") return r.source === "meta";
-    if (activeTab === "tiktok") return r.source === "tiktok";
-    return true;
-  });
+  const filteredRows = rows
+    .filter(r => {
+      if (activeTab === "meta") return r.source === "meta";
+      if (activeTab === "tiktok") return r.source === "tiktok";
+      return true;
+    })
+    .filter(r => {
+      if (activeAccount === "tiktok") return r.source === "tiktok";
+      if (activeAccount) return r.accountId === activeAccount;
+      return true;
+    })
+    .filter(r => r.spend > 0.5);
 
   const sorted = [...filteredRows].sort((a, b) => {
     const diff = a[sortKey] - b[sortKey];
@@ -247,7 +257,7 @@ export default function PerformancePage() {
         </div>
       </div>
 
-      {/* 9 KPI Cards */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-3">
         {/* Facebook */}
         <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
@@ -326,14 +336,26 @@ export default function PerformancePage() {
       {/* Account Boxes */}
       <div className="flex gap-2 flex-wrap">
         {accounts.map(acc => (
-          <div key={acc.accountId} className="bg-white border border-gray-100 rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-3">
+          <div key={acc.accountId}
+            onClick={() => setActiveAccount(activeAccount === acc.accountId ? null : acc.accountId)}
+            className={`cursor-pointer border rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-3 transition-all ${
+              activeAccount === acc.accountId
+                ? "border-blue-400 bg-blue-50"
+                : "bg-white border-gray-100 hover:border-blue-200"
+            }`}>
             <div className="w-5 h-5 text-blue-500"><MetaIcon size={14} /></div>
             <span className="text-xs font-medium text-gray-700">{acc.accountName}</span>
             <span className="text-sm font-bold text-blue-600">${parseFloat(acc.summary?.spend || "0").toFixed(2)}</span>
           </div>
         ))}
         {!loadingTT && !tiktok.error && (
-          <div className="bg-white border border-pink-100 rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-3">
+          <div
+            onClick={() => setActiveAccount(activeAccount === "tiktok" ? null : "tiktok")}
+            className={`cursor-pointer border rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-3 transition-all ${
+              activeAccount === "tiktok"
+                ? "border-pink-400 bg-pink-50"
+                : "bg-white border-pink-100 hover:border-pink-300"
+            }`}>
             <div className="w-5 h-5 text-pink-500"><TikTokIcon size={14} /></div>
             <span className="text-xs font-medium text-gray-700">TikTok Ads</span>
             <span className="text-sm font-bold text-pink-600">${ttSpend.toFixed(2)}</span>
@@ -344,6 +366,19 @@ export default function PerformancePage() {
           <span className="text-sm font-bold text-white">${totalSpend.toFixed(2)}</span>
         </div>
       </div>
+
+      {/* Active Account Filter Badge */}
+      {activeAccount && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Filtré par:</span>
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+            activeAccount === "tiktok" ? "bg-pink-50 text-pink-600" : "bg-blue-50 text-blue-600"
+          }`}>
+            {activeAccount === "tiktok" ? "TikTok Ads" : accounts.find(a => a.accountId === activeAccount)?.accountName}
+            <button onClick={() => setActiveAccount(null)} className="ml-1 hover:opacity-70">✕</button>
+          </span>
+        </div>
+      )}
 
       {/* Campaigns Table */}
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
@@ -397,10 +432,10 @@ export default function PerformancePage() {
                 <tr key={i} className="border-t border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="px-5 py-3 font-medium text-gray-800 max-w-[240px] truncate">{r.campaignName}</td>
                   <td className="px-4 py-3">
-                    {r.source === "meta" ? (
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-medium">
-                        <MetaIcon size={11} /> Meta
-                      </span>
+{r.source === "meta" ? (
+  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-medium">
+    <MetaIcon size={11} /> {r.accountName}
+  </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-pink-50 text-pink-600 text-xs font-medium">
                         <TikTokIcon size={11} /> TikTok

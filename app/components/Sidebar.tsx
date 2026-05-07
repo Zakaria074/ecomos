@@ -6,13 +6,16 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: "▦" },
   { href: "/dashboard/performance", label: "Performance & Rapports", icon: "↗" },
+  { href: "/dashboard/performance-calculator", label: "Performance Calculator", icon: "📊" },
  { href: "/dashboard/calculator", label: "Profit calculator", icon: "🧮" },
+ { href: "/dashboard/risk-management", label: "Risk Management", icon: "⚠️" },
   { href: "/dashboard/team", label: "Team Verification", icon: "👥" },
   { href: "/dashboard/profit", label: "Profit & Loss", icon: "💰" },
   { href: "/dashboard/products", label: "Products & Ad Spend", icon: "📦" },
   { href: "/dashboard/research", label: "Product Research", icon: "🔍" },
   { href: "/dashboard/stock", label: "Stock", icon: "🏪" },
   { href: "/dashboard/whatsapp", label: "WhatsApp Automations", icon: "💬" },
+  
   
 ];
 
