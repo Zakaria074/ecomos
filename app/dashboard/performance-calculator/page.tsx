@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { saveSetting, loadSetting } from "@/lib/supabase/settings";
 
 interface Campaign {
   campaign_name: string;
@@ -113,6 +114,7 @@ export default function PerformanceCalculatorPage() {
   const [activeAccount, setActiveAccount] = useState<string | null>(null);
   const [dolarRate, setDolarRate] = useState(250);
   const [calcInputs, setCalcInputs] = useState<Record<string, { prixVente: string; prixAchat: string; livrees: string }>>({});
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   const fetchAll = async (from: string, to: string) => {
     setLoadingMeta(true);
@@ -152,7 +154,30 @@ export default function PerformanceCalculatorPage() {
     setRows(parsed);
   };
 
-  useEffect(() => { fetchAll(dateFrom, dateTo); }, []);
+  // Load from Supabase + fetch API
+  useEffect(() => {
+    const init = async () => {
+      const savedInputs = await loadSetting("calc_inputs");
+      const savedRate = await loadSetting("calc_dollar_rate");
+      if (savedInputs) setCalcInputs(savedInputs);
+      if (savedRate) setDolarRate(savedRate);
+      setDataLoaded(true);
+    };
+    init();
+    fetchAll(dateFrom, dateTo);
+  }, []);
+
+  // Auto-save inputs
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("calc_inputs", calcInputs);
+  }, [calcInputs, dataLoaded]);
+
+  // Auto-save dollar rate
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("calc_dollar_rate", dolarRate);
+  }, [dolarRate, dataLoaded]);
 
   const applyPreset = (p: typeof PRESETS[0]) => {
     setDateFrom(p.from); setDateTo(p.to);
@@ -221,7 +246,7 @@ export default function PerformanceCalculatorPage() {
       return { ...r, inp, profit };
     });
 
-const html = `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
@@ -233,8 +258,6 @@ const html = `<!DOCTYPE html>
   </style>
 </head>
 <body>
-
-  <!-- Header -->
   <div style="background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 100%);color:white;border-radius:14px;padding:24px 32px;margin-bottom:22px;display:flex;justify-content:space-between;align-items:center;">
     <div>
       <div style="font-size:22px;font-weight:800;letter-spacing:-0.5px;">📊 Rapport Performance</div>
@@ -245,27 +268,23 @@ const html = `<!DOCTYPE html>
       <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:3px 10px;font-size:11px;font-weight:600;color:#92400e;display:inline-block;margin-top:6px;">💵 1$ = ${dolarRate} DZD</div>
     </div>
   </div>
-
-  <!-- KPIs -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px;">
     <div style="background:white;border-radius:10px;padding:16px;border:1px solid #e2e8f0;">
-      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#94a3b8;margin-bottom:6px;">Total Ad Spend</div>
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;color:#94a3b8;margin-bottom:6px;">Total Ad Spend</div>
       <div style="font-size:20px;font-weight:800;color:#2563eb;">$${totalSpend.toFixed(2)}</div>
       <div style="font-size:10px;color:#94a3b8;margin-top:4px;">FB $${fbSpend.toFixed(2)} · TK $${ttSpend.toFixed(2)}</div>
     </div>
     <div style="background:white;border-radius:10px;padding:16px;border:1px solid #e2e8f0;">
-      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#94a3b8;margin-bottom:6px;">Total Results</div>
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;color:#94a3b8;margin-bottom:6px;">Total Results</div>
       <div style="font-size:20px;font-weight:800;color:#16a34a;">${totalResults}</div>
       <div style="font-size:10px;color:#94a3b8;margin-top:4px;">FB ${fbResults} · TK ${ttResults}</div>
     </div>
     <div style="background:#0f172a;border-radius:10px;padding:16px;border:1px solid #0f172a;">
-      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin-bottom:6px;">CPR Moyen</div>
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:6px;">CPR Moyen</div>
       <div style="font-size:20px;font-weight:800;color:#a78bfa;">$${totalCPR.toFixed(2)}</div>
       <div style="font-size:10px;color:#475569;margin-top:4px;">${sorted.length} campagnes actives</div>
     </div>
   </div>
-
-  <!-- Table -->
   <div style="background:white;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden;">
     <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a;">
       📋 Détail des campagnes &nbsp;<span style="font-size:11px;color:#94a3b8;font-weight:400;">${sorted.length} campagnes</span>
@@ -274,7 +293,7 @@ const html = `<!DOCTYPE html>
       <thead>
         <tr style="background:#f8fafc;">
           ${["Campagne","Source","Spend","Results","CPR","Prix vente","Prix achat","Livrées","Profit/pièce"].map((h, i) =>
-            `<th style="padding:9px 10px;text-align:${i >= 2 && i !== 5 && i !== 6 && i !== 7 ? "right" : "left"};font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#94a3b8;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${h}</th>`
+            `<th style="padding:9px 10px;text-align:${i >= 2 && i !== 5 && i !== 6 && i !== 7 ? "right" : "left"};font-size:9px;font-weight:600;text-transform:uppercase;color:#94a3b8;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${h}</th>`
           ).join("")}
         </tr>
       </thead>
@@ -309,12 +328,9 @@ const html = `<!DOCTYPE html>
       </tbody>
     </table>
   </div>
-
-  <!-- Footer -->
   <div style="margin-top:16px;text-align:center;font-size:11px;color:#94a3b8;">
     Généré par EcomOS • ${new Date().toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
   </div>
-
 </body>
 </html>`;
 
@@ -334,7 +350,6 @@ const html = `<!DOCTYPE html>
 
   return (
     <div className="space-y-5 pb-8">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Performance Calculator</h2>
@@ -359,7 +374,6 @@ const html = `<!DOCTYPE html>
         </div>
       </div>
 
-      {/* Filtres */}
       <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex-wrap">
         <div className="flex gap-2">
           {PRESETS.map(p => (
@@ -382,7 +396,6 @@ const html = `<!DOCTYPE html>
         </div>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
@@ -422,7 +435,6 @@ const html = `<!DOCTYPE html>
         </div>
       </div>
 
-      {/* Account Boxes */}
       <div className="flex gap-2 flex-wrap">
         {accounts.map(acc => (
           <div key={acc.accountId}
@@ -451,7 +463,6 @@ const html = `<!DOCTYPE html>
         </div>
       </div>
 
-      {/* Active Account Filter Badge */}
       {activeAccount && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">Filtré par:</span>
@@ -464,7 +475,6 @@ const html = `<!DOCTYPE html>
         </div>
       )}
 
-      {/* Campaigns Table */}
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">

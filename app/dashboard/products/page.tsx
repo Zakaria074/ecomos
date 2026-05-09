@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createBrowserClient } from "@supabase/ssr";
+import { saveSetting, loadSetting } from "@/lib/supabase/settings";
 
 const SHOPS = [
   { key: "LEKIDI", name: "Lekidi09" },
@@ -39,27 +41,24 @@ interface ProductData {
   adSpendFb: number;
   adSpendTiktok: number;
   active: boolean;
+  addedBy?: string;
 }
 
-const PRODUCTS_KEY = "ecomos_adspend_products";
-const ACCOUNTS_KEY = "ecomos_ad_accounts";
-const DOLLAR_KEY = "ecomos_dollar_rate";
-
-function loadProducts(): ProductData[] {
-  try { return JSON.parse(localStorage.getItem(PRODUCTS_KEY) || "[]"); } catch { return []; }
+function getUserColor(name: string): string {
+  const colors = [
+    "bg-purple-100 text-purple-700",
+    "bg-blue-100 text-blue-700",
+    "bg-green-100 text-green-700",
+    "bg-pink-100 text-pink-700",
+    "bg-orange-100 text-orange-700",
+    "bg-teal-100 text-teal-700",
+    "bg-red-100 text-red-700",
+    "bg-yellow-100 text-yellow-700",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
 }
-function saveProducts(p: ProductData[]) { localStorage.setItem(PRODUCTS_KEY, JSON.stringify(p)); }
-
-function loadAccounts(): AdAccount[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "[]");
-    if (saved.length) return saved;
-  } catch {}
-  return ["Dino","Echri","SST","Wiaox","108","Choco","Lucky","Tik 1","Tik 2","snap"].map((name, i) => ({
-    id: i.toString(), name, spend: 0, checked: false,
-  }));
-}
-function saveAccounts(a: AdAccount[]) { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); }
 
 async function fetchEcoProducts(token: string): Promise<EcoProduct[]> {
   const base = process.env.NEXT_PUBLIC_ECOMANAGER_URL;
@@ -92,15 +91,9 @@ function getAdRisk(adTotal: number, costMax: number): { label: string; color: st
 }
 
 function buildPDF(
-  title: string,
-  today: string,
-  badge: string,
-  cards: { label: string; value: string | number; sub: string; borderColor: string; bgColor: string; borderCard: string; textColor: string; subColor: string }[],
-  tableHead: string,
-  tableRows: string,
-  footerCount: number,
-  footerLabel: string,
-  extraBlock: string = ""
+  title: string, today: string, badge: string,
+  cards: any[], tableHead: string, tableRows: string,
+  footerCount: number, footerLabel: string, extraBlock: string = ""
 ): string {
   const cardsHtml = cards.map(c => `
     <div style="background:${c.bgColor};border:1px solid ${c.borderCard};border-radius:12px;padding:4mm;border-left:4px solid ${c.borderColor}">
@@ -113,44 +106,31 @@ function buildPDF(
   return `<!DOCTYPE html>
 <html lang="fr"><head><meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:'Inter',sans-serif;background:#fff;color:#111827}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style></head><body>
 <div style="width:210mm;min-height:297mm;padding:14mm 12mm;margin:0 auto">
-
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8mm;padding-bottom:6mm;border-bottom:3px solid #7c3aed">
     <div>
-      <div style="font-size:28px;font-weight:800;color:#7c3aed;letter-spacing:-1px">Lekidi</div>
+      <div style="font-size:28px;font-weight:800;color:#7c3aed;letter-spacing:-1px">EcomOS</div>
       <div style="font-size:10px;color:#9ca3af;font-weight:500;text-transform:uppercase;letter-spacing:1.5px;margin-top:3px">${title}</div>
     </div>
     <div style="text-align:right">
       <div style="font-size:11px;color:#6b7280;margin-bottom:6px">${today}</div>
-      <div style="background:#f3f0ff;color:#7c3aed;font-size:10px;font-weight:700;padding:5px 14px;border-radius:20px;border:1px solid #ddd6fe;display:inline-block;letter-spacing:0.5px">${badge}</div>
+      <div style="background:#f3f0ff;color:#7c3aed;font-size:10px;font-weight:700;padding:5px 14px;border-radius:20px;border:1px solid #ddd6fe;display:inline-block">${badge}</div>
     </div>
   </div>
-
   ${extraBlock}
-
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4mm;margin-bottom:6mm">
-    ${cardsHtml}
-  </div>
-
-  <table style="width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-    <thead>
-      <tr style="background:#7c3aed">
-        ${tableHead}
-      </tr>
-    </thead>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4mm;margin-bottom:6mm">${cardsHtml}</div>
+  <table style="width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
+    <thead><tr style="background:#7c3aed">${tableHead}</tr></thead>
     <tbody>${tableRows}</tbody>
   </table>
-
   <div style="margin-top:8mm;padding-top:5mm;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
-    <div style="font-size:10px;color:#9ca3af">Généré automatiquement par <strong style="color:#7c3aed">Lekidi</strong></div>
+    <div style="font-size:10px;color:#9ca3af">Généré par <strong style="color:#7c3aed">EcomOS</strong></div>
     <div style="font-size:10px;color:#9ca3af">${footerCount} produits · ${footerLabel}</div>
   </div>
-
 </div></body></html>`;
 }
 
@@ -168,21 +148,39 @@ export default function ProductsAdSpendPage() {
   const [productSearch, setProductSearch] = useState("");
   const [pdfStockLoading, setPdfStockLoading] = useState(false);
   const [pdfProfitLoading, setPdfProfitLoading] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [currentUser, setCurrentUser] = useState("Admin");
 
   const [form, setForm] = useState({
-    ecoProductId: "",
-    costPrice: "",
-    sellingPrice: "",
-    rate: "",
-    adSpendFb: "",
-    adSpendTiktok: "",
+    ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "",
   });
 
   useEffect(() => {
-    setProducts(loadProducts());
-    setAccounts(loadAccounts());
-    const savedDollar = localStorage.getItem(DOLLAR_KEY);
-    if (savedDollar) setDollarRate(Number(savedDollar));
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        const name = data.user.user_metadata?.full_name || data.user.email?.split("@")[0] || "Admin";
+        setCurrentUser(name);
+      }
+    });
+
+    const init = async () => {
+      const savedProducts = await loadSetting("adspend_products");
+      const savedAccounts = await loadSetting("adspend_accounts");
+      const savedDollar = await loadSetting("adspend_dollar");
+      if (savedProducts) setProducts(savedProducts);
+      if (savedAccounts) setAccounts(savedAccounts);
+      else setAccounts(["Dino","Echri","SST","Wiaox","108","Choco","Lucky","Tik 1","Tik 2","snap"].map((name, i) => ({
+        id: i.toString(), name, spend: 0, checked: false,
+      })));
+      if (savedDollar) setDollarRate(savedDollar);
+      setDataLoaded(true);
+    };
+    init();
+
     SHOPS.forEach(s => {
       const token = TOKENS[s.key];
       if (!token) return;
@@ -192,10 +190,20 @@ export default function ProductsAdSpendPage() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("adspend_products", products);
+  }, [products, dataLoaded]);
+
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("adspend_accounts", accounts);
+  }, [accounts, dataLoaded]);
+
   const saveDollarRate = (val: string) => {
     const n = Number(val) || 250;
     setDollarRate(n);
-    localStorage.setItem(DOLLAR_KEY, n.toString());
+    saveSetting("adspend_dollar", n);
   };
 
   const totalAdSpend = products.filter(p => p.active).reduce((s, p) => s + p.adSpendFb + p.adSpendTiktok, 0);
@@ -203,171 +211,103 @@ export default function ProductsAdSpendPage() {
   const activeCount = products.filter(p => p.active).length;
   const stoppedCount = products.filter(p => !p.active).length;
 
-  // ══════════ PDF STOCK ══════════
   const handleGenerateStockPDF = async () => {
     setPdfStockLoading(true);
     try {
       const allProducts: { title: string; sku: string; stock: number }[] = [];
-
       for (const s of SHOPS) {
         const token = TOKENS[s.key];
         if (!token) continue;
         const prods = await fetchEcoProducts(token);
-        prods.forEach(p => {
-          allProducts.push({
-            title: p.title,
-            sku: p.variants?.[0]?.sku || "—",
-            stock: p.available_stock || 0,
-          });
-        });
+        prods.forEach(p => allProducts.push({ title: p.title, sku: p.variants?.[0]?.sku || "—", stock: p.available_stock || 0 }));
       }
-
       allProducts.sort((a, b) => {
-  const aHasStock = a.stock > 0 ? 0 : 1;
-  const bHasStock = b.stock > 0 ? 0 : 1;
-  if (aHasStock !== bHasStock) return aHasStock - bHasStock;
-  return a.sku.localeCompare(b.sku);
-});
-
+        const aH = a.stock > 0 ? 0 : 1; const bH = b.stock > 0 ? 0 : 1;
+        if (aH !== bH) return aH - bH;
+        return a.sku.localeCompare(b.sku);
+      });
       const today = new Date().toLocaleDateString("fr-DZ", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
       const totalOk = allProducts.filter(p => p.stock > 30).length;
       const totalNormal = allProducts.filter(p => p.stock >= 10 && p.stock <= 30).length;
-
       const tableHead = `
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:center;width:36px">#</th>
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:left">Produit</th>
-        <th style="padding:10px 12px;color:#ddd6fe;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:left">SKU</th>
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:center">Stock</th>
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:center">Check Stock</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:center;width:36px">#</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:left">Produit</th>
+        <th style="padding:10px 12px;color:#ddd6fe;font-size:10px;font-weight:700;text-align:left">SKU</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:center">Stock</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:center">Check</th>
       `;
-
-      const tableRows = allProducts.map((p, i) => {
-        const rowBg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
-        return `
-          <tr style="background:${rowBg}">
-            <td style="padding:8px 12px;color:#6b7280;font-size:11px;text-align:center;font-weight:600;border-bottom:1px solid #f3f4f6">${i + 1}</td>
-            <td style="padding:8px 12px;color:#111827;font-size:12px;font-weight:500;border-bottom:1px solid #f3f4f6">${p.title}</td>
-            <td style="padding:8px 12px;color:#9ca3af;font-size:11px;border-bottom:1px solid #f3f4f6">${p.sku}</td>
-            <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6">
-              <span style="font-size:14px;font-weight:700;color:#111827">≈ ${p.stock}</span>
-            </td>
-            <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6">
-              <div style="width:18px;height:18px;border:2px solid #d1d5db;border-radius:4px;margin:0 auto"></div>
-            </td>
-          </tr>
-        `;
-      }).join("");
-
-      const html = buildPDF(
-        "Rapport de Stock",
-        today,
-        "Stock > 10 unités",
-        [
-          { label: "Total produits", value: allProducts.length, sub: "tous les magasins", borderColor: "#7c3aed", bgColor: "#faf5ff", borderCard: "#ddd6fe", textColor: "#7c3aed", subColor: "#a78bfa" },
-          { label: "Statut OK", value: totalOk, sub: "plus de 30 unités", borderColor: "#10b981", bgColor: "#f0fdf4", borderCard: "#bbf7d0", textColor: "#10b981", subColor: "#6ee7b7" },
-          { label: "Normal", value: totalNormal, sub: "entre 10 et 30 unités", borderColor: "#f59e0b", bgColor: "#fffbeb", borderCard: "#fde68a", textColor: "#f59e0b", subColor: "#fcd34d" },
-        ],
-        tableHead,
-        tableRows,
-        allProducts.length,
-        "Stock > 10 unités"
-      );
-
+      const tableRows = allProducts.map((p, i) => `
+        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f9fafb"}">
+          <td style="padding:8px 12px;color:#6b7280;font-size:11px;text-align:center;border-bottom:1px solid #f3f4f6">${i + 1}</td>
+          <td style="padding:8px 12px;color:#111827;font-size:12px;border-bottom:1px solid #f3f4f6">${p.title}</td>
+          <td style="padding:8px 12px;color:#9ca3af;font-size:11px;border-bottom:1px solid #f3f4f6">${p.sku}</td>
+          <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6"><span style="font-size:14px;font-weight:700">≈ ${p.stock}</span></td>
+          <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6"><div style="width:18px;height:18px;border:2px solid #d1d5db;border-radius:4px;margin:0 auto"></div></td>
+        </tr>
+      `).join("");
+      const html = buildPDF("Rapport de Stock", today, "Stock", [
+        { label: "Total produits", value: allProducts.length, sub: "tous les magasins", borderColor: "#7c3aed", bgColor: "#faf5ff", borderCard: "#ddd6fe", textColor: "#7c3aed", subColor: "#a78bfa" },
+        { label: "Statut OK", value: totalOk, sub: "plus de 30 unités", borderColor: "#10b981", bgColor: "#f0fdf4", borderCard: "#bbf7d0", textColor: "#10b981", subColor: "#6ee7b7" },
+        { label: "Normal", value: totalNormal, sub: "10 à 30 unités", borderColor: "#f59e0b", bgColor: "#fffbeb", borderCard: "#fde68a", textColor: "#f59e0b", subColor: "#fcd34d" },
+      ], tableHead, tableRows, allProducts.length, "Stock");
       const win = window.open("", "_blank");
       if (!win) return;
-      win.document.write(html);
-      win.document.close();
-      setTimeout(() => { win.print(); }, 800);
+      win.document.write(html); win.document.close();
+      setTimeout(() => win.print(), 800);
     } catch (e) { console.error(e); }
     setPdfStockLoading(false);
   };
 
-  // ══════════ PDF PROFIT ══════════
   const handleGenerateProfitPDF = async () => {
     setPdfProfitLoading(true);
     try {
       const allProducts: { title: string; sku: string; stock: number }[] = [];
-
       for (const s of SHOPS) {
         const token = TOKENS[s.key];
         if (!token) continue;
         const prods = await fetchEcoProducts(token);
-        prods.forEach(p => {
-          allProducts.push({
-            title: p.title,
-            sku: p.variants?.[0]?.sku || "—",
-            stock: p.available_stock || 0,
-          });
-        });
+        prods.forEach(p => allProducts.push({ title: p.title, sku: p.variants?.[0]?.sku || "—", stock: p.available_stock || 0 }));
       }
-
       allProducts.sort((a, b) => {
-  const aHasStock = a.stock > 0 ? 0 : 1;
-  const bHasStock = b.stock > 0 ? 0 : 1;
-  if (aHasStock !== bHasStock) return aHasStock - bHasStock;
-  return a.sku.localeCompare(b.sku);
-});
-
+        const aH = a.stock > 0 ? 0 : 1; const bH = b.stock > 0 ? 0 : 1;
+        if (aH !== bH) return aH - bH;
+        return a.sku.localeCompare(b.sku);
+      });
       const today = new Date().toLocaleDateString("fr-DZ", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
       const totalOk = allProducts.filter(p => p.stock > 30).length;
       const totalNormal = allProducts.filter(p => p.stock >= 10 && p.stock <= 30).length;
-
       const tableHead = `
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:center;width:36px">#</th>
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:left">Produit</th>
-        <th style="padding:10px 12px;color:#ddd6fe;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:left">SKU</th>
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:center">Stock</th>
-        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;text-align:center">Profit</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:center;width:36px">#</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:left">Produit</th>
+        <th style="padding:10px 12px;color:#ddd6fe;font-size:10px;font-weight:700;text-align:left">SKU</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:center">Stock</th>
+        <th style="padding:10px 12px;color:#fff;font-size:10px;font-weight:700;text-align:center">Profit</th>
       `;
-
-      const tableRows = allProducts.map((p, i) => {
-        const rowBg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
-        return `
-          <tr style="background:${rowBg}">
-            <td style="padding:8px 12px;color:#6b7280;font-size:11px;text-align:center;font-weight:600;border-bottom:1px solid #f3f4f6">${i + 1}</td>
-            <td style="padding:8px 12px;color:#111827;font-size:12px;font-weight:500;border-bottom:1px solid #f3f4f6">${p.title}</td>
-            <td style="padding:8px 12px;color:#9ca3af;font-size:11px;border-bottom:1px solid #f3f4f6">${p.sku}</td>
-            <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6">
-              <span style="font-size:14px;font-weight:700;color:#111827">≈ ${p.stock}</span>
-            </td>
-            <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6">
-              <div style="width:80%;height:20px;border-bottom:1.5px solid #d1d5db;margin:0 auto"></div>
-            </td>
-          </tr>
-        `;
-      }).join("");
-
-      // مكان كتابة Net Profit يدوياً
-      const extraBlock = ``;
-
-      const html = buildPDF(
-        "Rapport de Profit",
-        today,
-        "Stock > 10 unités",
-        [
-          { label: "Total produits", value: allProducts.length, sub: "tous les magasins", borderColor: "#7c3aed", bgColor: "#faf5ff", borderCard: "#ddd6fe", textColor: "#7c3aed", subColor: "#a78bfa" },
-          { label: "Statut OK", value: totalOk, sub: "plus de 30 unités", borderColor: "#10b981", bgColor: "#f0fdf4", borderCard: "#bbf7d0", textColor: "#10b981", subColor: "#6ee7b7" },
-          { label: "Normal", value: totalNormal, sub: "entre 10 et 30 unités", borderColor: "#f59e0b", bgColor: "#fffbeb", borderCard: "#fde68a", textColor: "#f59e0b", subColor: "#fcd34d" },
-        ],
-        tableHead,
-        tableRows,
-        allProducts.length,
-        "Rapport de Profit",
-        extraBlock
-      );
-
+      const tableRows = allProducts.map((p, i) => `
+        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f9fafb"}">
+          <td style="padding:8px 12px;color:#6b7280;font-size:11px;text-align:center;border-bottom:1px solid #f3f4f6">${i + 1}</td>
+          <td style="padding:8px 12px;color:#111827;font-size:12px;border-bottom:1px solid #f3f4f6">${p.title}</td>
+          <td style="padding:8px 12px;color:#9ca3af;font-size:11px;border-bottom:1px solid #f3f4f6">${p.sku}</td>
+          <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6"><span style="font-size:14px;font-weight:700">≈ ${p.stock}</span></td>
+          <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #f3f4f6"><div style="width:80%;height:20px;border-bottom:1.5px solid #d1d5db;margin:0 auto"></div></td>
+        </tr>
+      `).join("");
+      const html = buildPDF("Rapport de Profit", today, "Profit", [
+        { label: "Total produits", value: allProducts.length, sub: "tous les magasins", borderColor: "#7c3aed", bgColor: "#faf5ff", borderCard: "#ddd6fe", textColor: "#7c3aed", subColor: "#a78bfa" },
+        { label: "Statut OK", value: totalOk, sub: "plus de 30 unités", borderColor: "#10b981", bgColor: "#f0fdf4", borderCard: "#bbf7d0", textColor: "#10b981", subColor: "#6ee7b7" },
+        { label: "Normal", value: totalNormal, sub: "10 à 30 unités", borderColor: "#f59e0b", bgColor: "#fffbeb", borderCard: "#fde68a", textColor: "#f59e0b", subColor: "#fcd34d" },
+      ], tableHead, tableRows, allProducts.length, "Profit");
       const win = window.open("", "_blank");
       if (!win) return;
-      win.document.write(html);
-      win.document.close();
-      setTimeout(() => { win.print(); }, 800);
+      win.document.write(html); win.document.close();
+      setTimeout(() => win.print(), 800);
     } catch (e) { console.error(e); }
     setPdfProfitLoading(false);
   };
 
   const saveProduct = () => {
     if (editingId) {
-      const updated = products.map(p =>
+      setProducts(prev => prev.map(p =>
         p.id === editingId ? {
           ...p,
           sellingPrice: Number(form.sellingPrice) || p.sellingPrice,
@@ -376,9 +316,7 @@ export default function ProductsAdSpendPage() {
           adSpendFb: Number(form.adSpendFb) || 0,
           adSpendTiktok: Number(form.adSpendTiktok) || 0,
         } : p
-      );
-      saveProducts(updated);
-      setProducts(updated);
+      ));
     } else {
       const ecoList = ecoProductsByShop[selectedShopForAdd] || [];
       const eco = ecoList.find(p => p.id.toString() === form.ecoProductId);
@@ -394,53 +332,25 @@ export default function ProductsAdSpendPage() {
         adSpendFb: Number(form.adSpendFb) || 0,
         adSpendTiktok: Number(form.adSpendTiktok) || 0,
         active: true,
+        addedBy: currentUser,
       };
-      const updated = [...products, np];
-      saveProducts(updated);
-      setProducts(updated);
+      setProducts(prev => [...prev, np]);
     }
     setShowAddPanel(false);
     setEditingId(null);
     setProductSearch("");
   };
 
-  const deleteProduct = (id: string) => {
-    const updated = products.filter(p => p.id !== id);
-    saveProducts(updated);
-    setProducts(updated);
-  };
-
-  const toggleActive = (id: string) => {
-    const updated = products.map(p => p.id === id ? { ...p, active: !p.active } : p);
-    saveProducts(updated);
-    setProducts(updated);
-  };
-
-  const updateAccountSpend = (id: string, val: string) => {
-    const updated = accounts.map(a => a.id === id ? { ...a, spend: Number(val) || 0 } : a);
-    saveAccounts(updated);
-    setAccounts(updated);
-  };
-
-  const toggleAccountCheck = (id: string) => {
-    const updated = accounts.map(a => a.id === id ? { ...a, checked: !a.checked } : a);
-    saveAccounts(updated);
-    setAccounts(updated);
-  };
-
+  const deleteProduct = (id: string) => setProducts(prev => prev.filter(p => p.id !== id));
+  const toggleActive = (id: string) => setProducts(prev => prev.map(p => p.id === id ? { ...p, active: !p.active } : p));
+  const updateAccountSpend = (id: string, val: string) => setAccounts(prev => prev.map(a => a.id === id ? { ...a, spend: Number(val) || 0 } : a));
+  const toggleAccountCheck = (id: string) => setAccounts(prev => prev.map(a => a.id === id ? { ...a, checked: !a.checked } : a));
   const addAccount = () => {
     if (!newAccountName.trim()) return;
-    const updated = [...accounts, { id: Date.now().toString(), name: newAccountName.trim(), spend: 0, checked: false }];
-    saveAccounts(updated);
-    setAccounts(updated);
+    setAccounts(prev => [...prev, { id: Date.now().toString(), name: newAccountName.trim(), spend: 0, checked: false }]);
     setNewAccountName("");
   };
-
-  const deleteAccount = (id: string) => {
-    const updated = accounts.filter(a => a.id !== id);
-    saveAccounts(updated);
-    setAccounts(updated);
-  };
+  const deleteAccount = (id: string) => setAccounts(prev => prev.filter(a => a.id !== id));
 
   const filteredProducts = products.filter(p =>
     p.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -455,30 +365,18 @@ export default function ProductsAdSpendPage() {
           <p className="text-sm text-gray-400 mt-0.5">Suivi des dépenses publicitaires — tous les magasins</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleGenerateStockPDF}
-            disabled={pdfStockLoading}
+          <button onClick={handleGenerateStockPDF} disabled={pdfStockLoading}
             className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-2xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 transition-all shadow-sm disabled:opacity-50">
-            {pdfStockLoading ? (
-              <><div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />Chargement...</>
-            ) : <>📦 PDF Stock</>}
+            {pdfStockLoading ? <><div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />Chargement...</> : <>📦 PDF Stock</>}
           </button>
-          <button
-            onClick={handleGenerateProfitPDF}
-            disabled={pdfProfitLoading}
+          <button onClick={handleGenerateProfitPDF} disabled={pdfProfitLoading}
             className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-2xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 transition-all shadow-sm disabled:opacity-50">
-            {pdfProfitLoading ? (
-              <><div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />Chargement...</>
-            ) : <>💰 PDF Profit</>}
+            {pdfProfitLoading ? <><div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />Chargement...</> : <>💰 PDF Profit</>}
           </button>
           <div className="flex items-center gap-2 bg-white border border-gray-100 rounded-2xl px-4 py-2.5 shadow-sm">
             <span className="text-xs text-gray-400 font-medium">1$ =</span>
-            <input
-              type="number"
-              value={dollarRate}
-              onChange={e => saveDollarRate(e.target.value)}
-              className="w-16 text-base font-bold text-purple-600 focus:outline-none bg-transparent text-right"
-            />
+            <input type="number" value={dollarRate} onChange={e => saveDollarRate(e.target.value)}
+              className="w-16 text-base font-bold text-purple-600 focus:outline-none bg-transparent text-right" />
             <span className="text-xs text-gray-400 font-medium">DZD</span>
           </div>
         </div>
@@ -516,16 +414,12 @@ export default function ProductsAdSpendPage() {
               <div key={a.id} className={`grid grid-cols-3 items-center py-1.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors ${a.checked ? "bg-blue-50/60 px-1" : "hover:bg-gray-50"}`}>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-gray-700 font-medium">{a.name}</span>
-                  <button onClick={() => deleteAccount(a.id)} className="text-gray-200 hover:text-red-400 text-xs ml-1 transition-colors">✕</button>
+                  <button onClick={() => deleteAccount(a.id)} className="text-gray-200 hover:text-red-400 text-xs ml-1">✕</button>
                 </div>
-                <input type="number" value={a.spend || ""}
-                  onChange={e => updateAccountSpend(a.id, e.target.value)}
-                  className={`text-right bg-transparent text-xs focus:outline-none w-full font-semibold ${a.checked ? "text-blue-600" : "text-gray-500"}`}
-                  placeholder="0.00" />
+                <input type="number" value={a.spend || ""} onChange={e => updateAccountSpend(a.id, e.target.value)}
+                  className={`text-right bg-transparent text-xs focus:outline-none w-full font-semibold ${a.checked ? "text-blue-600" : "text-gray-500"}`} placeholder="0.00" />
                 <div className="flex justify-center">
-                  <input type="checkbox" checked={a.checked}
-                    onChange={() => toggleAccountCheck(a.id)}
-                    className="accent-blue-500 w-4 h-4 cursor-pointer" />
+                  <input type="checkbox" checked={a.checked} onChange={() => toggleAccountCheck(a.id)} className="accent-blue-500 w-4 h-4 cursor-pointer" />
                 </div>
               </div>
             ))}
@@ -543,12 +437,11 @@ export default function ProductsAdSpendPage() {
                   onChange={e => setNewAccountName(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && addAccount()}
                   className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-900 focus:outline-none focus:border-purple-400" />
-                <button onClick={addAccount} className="px-2 py-1 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-700 transition-colors">OK</button>
+                <button onClick={addAccount} className="px-2 py-1 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-700">OK</button>
                 <button onClick={() => setShowAccountPanel(false)} className="text-gray-400 text-xs hover:text-gray-600">✕</button>
               </div>
             ) : (
-              <button onClick={() => setShowAccountPanel(true)}
-                className="text-xs text-purple-500 hover:text-purple-700 w-full text-left transition-colors font-medium">
+              <button onClick={() => setShowAccountPanel(true)} className="text-xs text-purple-500 hover:text-purple-700 w-full text-left font-medium">
                 + Ajouter compte
               </button>
             )}
@@ -559,9 +452,7 @@ export default function ProductsAdSpendPage() {
       {showAddPanel && (
         <div className="bg-white rounded-2xl border border-purple-100 p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-gray-900">
-              {editingId ? "Modifier le produit" : "Ajouter un produit"}
-            </div>
+            <div className="text-sm font-semibold text-gray-900">{editingId ? "Modifier le produit" : "Ajouter un produit"}</div>
             <button onClick={() => { setShowAddPanel(false); setProductSearch(""); }} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
           </div>
           {!editingId && (
@@ -592,10 +483,7 @@ export default function ProductsAdSpendPage() {
                         .slice(0, 200)
                         .map(p => (
                           <div key={p.id}
-                            onClick={() => {
-                              setForm(f => ({ ...f, ecoProductId: p.id.toString(), sellingPrice: p.variants?.[0]?.price || "" }));
-                              setProductSearch(p.title);
-                            }}
+                            onClick={() => { setForm(f => ({ ...f, ecoProductId: p.id.toString(), sellingPrice: p.variants?.[0]?.price || "" })); setProductSearch(p.title); }}
                             className="px-3 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 cursor-pointer border-b border-gray-50 last:border-0">
                             {p.title} <span className="text-gray-400 text-xs">— {p.variants?.[0]?.sku || "—"}</span>
                           </div>
@@ -607,36 +495,20 @@ export default function ProductsAdSpendPage() {
             </div>
           )}
           <div className="grid grid-cols-5 gap-3">
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Prix vente (DZD)</label>
-              <input type="number" placeholder="0" value={form.sellingPrice}
-                onChange={e => setForm(f => ({ ...f, sellingPrice: e.target.value }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-400" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Prix achat (DZD)</label>
-              <input type="number" placeholder="0" value={form.costPrice}
-                onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-400" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Taux % (conf+livr)</label>
-              <input type="number" placeholder="ex: 60" value={form.rate}
-                onChange={e => setForm(f => ({ ...f, rate: e.target.value }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-400" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Ad Spend FB ($)</label>
-              <input type="number" placeholder="0.00" value={form.adSpendFb}
-                onChange={e => setForm(f => ({ ...f, adSpendFb: e.target.value }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-400" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Ad Spend TikTok ($)</label>
-              <input type="number" placeholder="0.00" value={form.adSpendTiktok}
-                onChange={e => setForm(f => ({ ...f, adSpendTiktok: e.target.value }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-400" />
-            </div>
+            {[
+              { label: "Prix vente (DZD)", key: "sellingPrice" },
+              { label: "Prix achat (DZD)", key: "costPrice" },
+              { label: "Taux % (conf+livr)", key: "rate" },
+              { label: "Ad Spend FB ($)", key: "adSpendFb" },
+              { label: "Ad Spend TikTok ($)", key: "adSpendTiktok" },
+            ].map(f => (
+              <div key={f.key}>
+                <label className="text-xs text-gray-400 mb-1 block">{f.label}</label>
+                <input type="number" placeholder="0" value={(form as any)[f.key]}
+                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-purple-400" />
+              </div>
+            ))}
           </div>
           {form.sellingPrice && form.costPrice && form.rate && (
             <div className="bg-orange-50 rounded-xl px-4 py-2.5 flex items-center gap-4 text-sm">
@@ -650,8 +522,7 @@ export default function ProductsAdSpendPage() {
             </div>
           )}
           <div className="flex justify-end">
-            <button onClick={saveProduct}
-              disabled={!editingId && !form.ecoProductId}
+            <button onClick={saveProduct} disabled={!editingId && !form.ecoProductId}
               className="px-4 py-2 rounded-xl text-sm font-medium bg-purple-600 text-white disabled:opacity-40 hover:bg-purple-700 transition-all">
               {editingId ? "Enregistrer" : "Ajouter"}
             </button>
@@ -663,8 +534,7 @@ export default function ProductsAdSpendPage() {
         <div className="flex items-center justify-between mb-4">
           <div className="text-sm font-semibold text-gray-900">Produits — tous les magasins</div>
           <div className="flex items-center gap-2">
-            <input type="text" placeholder="Rechercher..." value={search}
-              onChange={e => setSearch(e.target.value)}
+            <input type="text" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)}
               className="border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400 w-56" />
             <button onClick={() => { setShowAddPanel(true); setEditingId(null); setForm({ ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "" }); }}
               className="px-4 py-2 rounded-xl text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-all shadow-sm shadow-purple-200">
@@ -675,6 +545,7 @@ export default function ProductsAdSpendPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-gray-400 border-b border-gray-100">
+              <th className="text-left pb-3 font-medium w-8"></th>
               <th className="text-left pb-3 font-medium">منتج</th>
               <th className="text-left pb-3 font-medium">متجر</th>
               <th className="text-right pb-3 font-medium">سعر البيع</th>
@@ -692,7 +563,7 @@ export default function ProductsAdSpendPage() {
           <tbody>
             {filteredProducts.length === 0 ? (
               <tr>
-                <td colSpan={12} className="text-center py-12 text-gray-300">
+                <td colSpan={13} className="text-center py-12 text-gray-300">
                   <div className="text-3xl mb-2">📦</div>
                   <div className="text-xs">Aucun produit — cliquez sur "+ Ajouter"</div>
                 </td>
@@ -705,6 +576,13 @@ export default function ProductsAdSpendPage() {
                 const shopName = SHOPS.find(s => s.key === p.shop)?.name || p.shop;
                 return (
                   <tr key={p.id} className={`border-b border-gray-50 last:border-0 transition-colors ${!p.active ? "opacity-40" : "hover:bg-gray-50/70"}`}>
+                    <td className="py-2.5 pr-1">
+                      {p.addedBy && (
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-md ${getUserColor(p.addedBy)}`}>
+                          {p.addedBy.slice(0, 4)}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2.5 text-gray-700 font-medium max-w-[180px] truncate">{p.title}</td>
                     <td className="py-2.5">
                       <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-lg font-medium">{shopName}</span>
@@ -712,18 +590,12 @@ export default function ProductsAdSpendPage() {
                     <td className="py-2.5 text-right text-gray-700 font-medium">{p.sellingPrice.toLocaleString()}</td>
                     <td className="py-2.5 text-right text-gray-500 font-medium">{p.costPrice.toLocaleString()}</td>
                     <td className="py-2.5 text-right text-gray-400 text-xs">{p.rate || 0}%</td>
-                    <td className="py-2.5 text-right">
-                      <span className="text-blue-500 font-medium">{p.adSpendFb.toFixed(2)}</span>
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <span className="text-pink-500 font-medium">{p.adSpendTiktok.toFixed(2)}</span>
-                    </td>
+                    <td className="py-2.5 text-right"><span className="text-blue-500 font-medium">{p.adSpendFb.toFixed(2)}</span></td>
+                    <td className="py-2.5 text-right"><span className="text-pink-500 font-medium">{p.adSpendTiktok.toFixed(2)}</span></td>
                     <td className="py-2.5 text-right font-semibold text-gray-700">{total.toFixed(2)}</td>
                     <td className="py-2.5 text-right font-bold text-orange-500">${costMax.toFixed(2)}</td>
                     <td className="py-2.5 text-right">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-lg ${risk.bg} ${risk.color}`}>
-                        {risk.label}
-                      </span>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-lg ${risk.bg} ${risk.color}`}>{risk.label}</span>
                     </td>
                     <td className="py-2.5 text-center">
                       <button onClick={() => toggleActive(p.id)}
@@ -735,18 +607,10 @@ export default function ProductsAdSpendPage() {
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => {
                           setEditingId(p.id);
-                          setForm({
-                            ecoProductId: p.id,
-                            sellingPrice: p.sellingPrice.toString(),
-                            costPrice: p.costPrice.toString(),
-                            rate: p.rate?.toString() || "",
-                            adSpendFb: p.adSpendFb.toString(),
-                            adSpendTiktok: p.adSpendTiktok.toString(),
-                          });
+                          setForm({ ecoProductId: p.id, sellingPrice: p.sellingPrice.toString(), costPrice: p.costPrice.toString(), rate: p.rate?.toString() || "", adSpendFb: p.adSpendFb.toString(), adSpendTiktok: p.adSpendTiktok.toString() });
                           setShowAddPanel(true);
                         }} className="text-gray-300 hover:text-purple-500 transition-colors text-xs">✏️</button>
-                        <button onClick={() => deleteProduct(p.id)}
-                          className="text-gray-300 hover:text-red-500 transition-colors text-xs">✕</button>
+                        <button onClick={() => deleteProduct(p.id)} className="text-gray-300 hover:text-red-500 transition-colors text-xs">✕</button>
                       </div>
                     </td>
                   </tr>
