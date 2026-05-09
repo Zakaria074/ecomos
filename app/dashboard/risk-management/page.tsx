@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { saveSetting, loadSetting } from "@/lib/supabase/settings";
 
 interface Campaign {
   campaign_name: string;
@@ -110,6 +111,7 @@ export default function RiskManagementPage() {
   const [activeAccount, setActiveAccount] = useState<string | null>(null);
   const [dolarRate, setDolarRate] = useState(250);
   const [inputs, setInputs] = useState<Record<string, { prixVente: string; prixAchat: string }>>({});
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   const fetchAll = async (from: string, to: string) => {
     setLoadingMeta(true);
@@ -143,7 +145,27 @@ export default function RiskManagementPage() {
     setRows(parsed);
   };
 
-  useEffect(() => { fetchAll(dateFrom, dateTo); }, []);
+  useEffect(() => {
+    const init = async () => {
+      const savedInputs = await loadSetting("risk_inputs");
+      const savedRate = await loadSetting("risk_dollar_rate");
+      if (savedInputs) setInputs(savedInputs);
+      if (savedRate) setDolarRate(savedRate);
+      setDataLoaded(true);
+    };
+    init();
+    fetchAll(dateFrom, dateTo);
+  }, []);
+
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("risk_inputs", inputs);
+  }, [inputs, dataLoaded]);
+
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("risk_dollar_rate", dolarRate);
+  }, [dolarRate, dataLoaded]);
 
   const applyPreset = (p: typeof PRESETS[0]) => {
     setDateFrom(p.from); setDateTo(p.to);
@@ -225,7 +247,6 @@ export default function RiskManagementPage() {
 
   return (
     <div className="space-y-5 pb-8">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Risk Management</h2>
@@ -240,7 +261,6 @@ export default function RiskManagementPage() {
         </div>
       </div>
 
-      {/* Filtres */}
       <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex-wrap">
         <div className="flex gap-2">
           {PRESETS.map(p => (
@@ -263,7 +283,6 @@ export default function RiskManagementPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
@@ -300,7 +319,6 @@ export default function RiskManagementPage() {
         </div>
       </div>
 
-      {/* Account Boxes */}
       <div className="flex gap-2 flex-wrap">
         {accounts.map(acc => (
           <div key={acc.accountId}
@@ -329,7 +347,6 @@ export default function RiskManagementPage() {
         </div>
       </div>
 
-      {/* Active Account Filter Badge */}
       {activeAccount && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">Filtré par:</span>
@@ -342,7 +359,6 @@ export default function RiskManagementPage() {
         </div>
       )}
 
-      {/* Danger Zone Card */}
       {dangerRows.length > 0 && (
         <div className="bg-red-950 border border-red-900 rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -380,7 +396,6 @@ export default function RiskManagementPage() {
         </div>
       )}
 
-      {/* No danger */}
       {!loading && dangerRows.length === 0 && hasAnyInput && (
         <div className="bg-green-50 border border-green-100 rounded-2xl p-5 flex items-center gap-3">
           <span className="text-2xl">✅</span>
@@ -391,7 +406,6 @@ export default function RiskManagementPage() {
         </div>
       )}
 
-      {/* Table */}
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
