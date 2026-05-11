@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
+import { saveSetting, loadSetting } from "@/lib/supabase/settings";
 
 interface OrderRow {
   statut: string;
@@ -55,18 +56,6 @@ const SIMILAR_COLORS = [
   "border-l-2 border-l-red-400",
   "border-l-2 border-l-yellow-400",
 ];
-
-const GROUPS_KEY = "ecomos_profit_groups";
-const OPS_KEY = "ecomos_ops_state";
-
-function loadGroups(): ProductGroup[] {
-  try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]"); } catch { return []; }
-}
-function saveGroups(g: ProductGroup[]) { localStorage.setItem(GROUPS_KEY, JSON.stringify(g)); }
-function loadOpsState() {
-  try { return JSON.parse(localStorage.getItem(OPS_KEY) || "null"); } catch { return null; }
-}
-function saveOpsState(s: any) { localStorage.setItem(OPS_KEY, JSON.stringify(s)); }
 
 function getBase(name: string): string {
   return name.toLowerCase().replace(/[-_]?tik\s*$/i, "").replace(/\s+/g, " ").trim();
@@ -122,29 +111,55 @@ export default function ProfitPage() {
   const [employees, setEmployees] = useState<Employee[]>(DEFAULT_EMPLOYEES);
   const [extras, setExtras] = useState<ExtraItem[]>(DEFAULT_EXTRAS);
 
+  const [dataLoaded, setDataLoaded] = useState(false);
+
+  // Load from Supabase
   useEffect(() => {
-    setManualGroups(loadGroups());
-    const saved = loadOpsState();
-    if (saved) {
-      if (saved.opSalaries !== undefined) setOpSalaries(saved.opSalaries);
-      if (saved.opCrm !== undefined) setOpCrm(saved.opCrm);
-      if (saved.opRent !== undefined) setOpRent(saved.opRent);
-      if (saved.opUtilities !== undefined) setOpUtilities(saved.opUtilities);
-      if (saved.opBonus !== undefined) setOpBonus(saved.opBonus);
-      if (saved.offTaqkid !== undefined) setOffTaqkid(saved.offTaqkid);
-      if (saved.offSohfa !== undefined) setOffSohfa(saved.offSohfa);
-      if (saved.offTswiq !== undefined) setOffTswiq(saved.offTswiq);
-      if (saved.employees) setEmployees(saved.employees);
-      if (saved.extras) setExtras(saved.extras);
-      if (saved.dollarRate !== undefined) setDollarRate(saved.dollarRate);
-      if (saved.packaging !== undefined) setPackaging(saved.packaging);
-      if (saved.confirmedRate !== undefined) setConfirmedRate(saved.confirmedRate);
-    }
+    const init = async () => {
+      const groups = await loadSetting("pnl_groups");
+      const ops = await loadSetting("pnl_ops");
+      const inputs = await loadSetting("pnl_inputs");
+
+      if (groups) setManualGroups(groups);
+
+      if (ops) {
+        if (ops.opSalaries !== undefined) setOpSalaries(ops.opSalaries);
+        if (ops.opCrm !== undefined) setOpCrm(ops.opCrm);
+        if (ops.opRent !== undefined) setOpRent(ops.opRent);
+        if (ops.opUtilities !== undefined) setOpUtilities(ops.opUtilities);
+        if (ops.opBonus !== undefined) setOpBonus(ops.opBonus);
+        if (ops.offTaqkid !== undefined) setOffTaqkid(ops.offTaqkid);
+        if (ops.offSohfa !== undefined) setOffSohfa(ops.offSohfa);
+        if (ops.offTswiq !== undefined) setOffTswiq(ops.offTswiq);
+        if (ops.employees) setEmployees(ops.employees);
+        if (ops.extras) setExtras(ops.extras);
+        if (ops.dollarRate !== undefined) setDollarRate(ops.dollarRate);
+        if (ops.packaging !== undefined) setPackaging(ops.packaging);
+        if (ops.confirmedRate !== undefined) setConfirmedRate(ops.confirmedRate);
+      }
+
+      if (inputs) {
+        if (inputs.adsDollar) setAdsDollar(inputs.adsDollar);
+        if (inputs.prixAchat) setPrixAchat(inputs.prixAchat);
+        if (inputs.bonus) setBonus(inputs.bonus);
+      }
+
+      setDataLoaded(true);
+    };
+    init();
   }, []);
 
+  // Save ops
   useEffect(() => {
-    saveOpsState({ opSalaries, opCrm, opRent, opUtilities, opBonus, offTaqkid, offSohfa, offTswiq, employees, extras, dollarRate, packaging, confirmedRate });
-  }, [opSalaries, opCrm, opRent, opUtilities, opBonus, offTaqkid, offSohfa, offTswiq, employees, extras, dollarRate, packaging, confirmedRate]);
+    if (!dataLoaded) return;
+    saveSetting("pnl_ops", { opSalaries, opCrm, opRent, opUtilities, opBonus, offTaqkid, offSohfa, offTswiq, employees, extras, dollarRate, packaging, confirmedRate });
+  }, [opSalaries, opCrm, opRent, opUtilities, opBonus, offTaqkid, offSohfa, offTswiq, employees, extras, dollarRate, packaging, confirmedRate, dataLoaded]);
+
+  // Save inputs
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveSetting("pnl_inputs", { adsDollar, prixAchat, bonus });
+  }, [adsDollar, prixAchat, bonus, dataLoaded]);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -165,7 +180,6 @@ export default function ProfitPage() {
         sku: String(r[16] || "").trim(),
         nomProduit: String(r[17] || "").trim(),
         quantite: Number(r[19]) || 1,
-        // AB = index 27 (A=0, B=1, ... Z=25, AA=26, AB=27)
         fraisLivreur: Number(r[27]) || 0,
         totalCommande: Number(r[28]) || 0,
         methode: String(r[5] || "").trim(),
@@ -230,7 +244,6 @@ export default function ProfitPage() {
   const totalDelivered = products.reduce((s, p) => s + p.delivered, 0);
   const totalOrders = products.reduce((s, p) => s + p.totalOrders, 0);
 
-  // Top 5 par profits
   const top5 = useMemo(() => {
     return [...products]
       .map(p => ({ ...p, profits: calcProduct(p).profits }))
@@ -249,7 +262,7 @@ export default function ProfitPage() {
     const cleaned = manualGroups.map(g => ({ ...g, skus: g.skus.filter(s => !selectedSkus.includes(s)) })).filter(g => g.skus.length > 1);
     const newGroup: ProductGroup = { id: Date.now().toString(), skus: selectedSkus, color: colorIdx };
     const updated = [...cleaned, newGroup];
-    saveGroups(updated);
+    saveSetting("pnl_groups", updated);
     setManualGroups(updated);
     setShowGroupPanel(false);
     setSelectedSkus([]);
@@ -258,7 +271,7 @@ export default function ProfitPage() {
 
   const removeGroup = (id: string) => {
     const updated = manualGroups.filter(g => g.id !== id);
-    saveGroups(updated);
+    saveSetting("pnl_groups", updated);
     setManualGroups(updated);
   };
 
@@ -335,13 +348,10 @@ export default function ProfitPage() {
     </div>
   );
 
-  const medalColors = ["text-yellow-500", "text-gray-400", "text-orange-400", "text-gray-500", "text-gray-500"];
   const medals = ["🥇", "🥈", "🥉", "4", "5"];
 
   return (
     <div className="space-y-4">
-
-      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Profit & Loss</h2>
@@ -353,7 +363,6 @@ export default function ProfitPage() {
         </label>
       </div>
 
-      {/* ROW 1: Operations panel */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
           <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Operations</p>
@@ -384,7 +393,6 @@ export default function ProfitPage() {
           </div>
 
           <div className="grid grid-cols-3 gap-4 border-t border-gray-50 pt-4">
-            {/* Salaires */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Salaires</p>
@@ -411,7 +419,6 @@ export default function ProfitPage() {
               </button>
             </div>
 
-            {/* زيادات */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">زيادات</p>
@@ -439,7 +446,6 @@ export default function ProfitPage() {
               </button>
             </div>
 
-            {/* Stats */}
             <div>
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">Statistiques</p>
               <div className="grid grid-cols-2 gap-1.5">
@@ -464,52 +470,43 @@ export default function ProfitPage() {
         </div>
       </div>
 
-      {/* ROW 2: 6 stat cards + Top 5 */}
       <div className="grid grid-cols-7 gap-3">
-        {/* Net Profit */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-emerald-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-1">Net Profit</p>
           <p className={`text-lg font-bold pl-3 tabular-nums leading-tight ${netProfitAfterOps >= 0 ? "text-emerald-500" : "text-red-500"}`}>{fmt(netProfitAfterOps)}</p>
           <p className="text-[10px] text-gray-400 pl-3 mt-1">÷2 = {fmt(netProfitAfterOps / 2)}</p>
         </div>
-        {/* Ventes */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-blue-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-1">Ventes</p>
           <p className="text-lg font-bold text-blue-500 pl-3 tabular-nums leading-tight">{fmt(totalSales)}</p>
           <p className="text-[10px] text-gray-400 pl-3 mt-1">DZD</p>
         </div>
-        {/* Ads */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-orange-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-1">Total Ads</p>
           <p className="text-lg font-bold text-orange-500 pl-3 tabular-nums leading-tight">${fmt(totalAds, 2)}</p>
           <p className="text-[10px] text-gray-400 pl-3 mt-1">= {fmt(totalAds * dollarRate)} DZD</p>
         </div>
-        {/* Produits actifs */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-violet-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-1">Produits actifs</p>
           <p className="text-lg font-bold text-violet-500 pl-3 tabular-nums leading-tight">{produitsActifs}</p>
           <p className="text-[10px] text-gray-400 pl-3 mt-1">+5 livraisons</p>
         </div>
-        {/* Domicile */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-teal-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-1">À domicile</p>
           <p className="text-lg font-bold text-teal-500 pl-3 tabular-nums leading-tight">{totalDomicile}</p>
           <p className="text-[10px] text-gray-400 pl-3 mt-1">{totalDelivered > 0 ? pct((totalDomicile / totalDelivered) * 100) : "—"}</p>
         </div>
-        {/* Stop desk */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-indigo-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-1">Stop desk</p>
           <p className="text-lg font-bold text-indigo-500 pl-3 tabular-nums leading-tight">{totalStopDesk}</p>
           <p className="text-[10px] text-gray-400 pl-3 mt-1">{totalDelivered > 0 ? pct((totalStopDesk / totalDelivered) * 100) : "—"}</p>
         </div>
-
-        {/* Top 5 */}
         <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm relative overflow-hidden">
           <div className="absolute inset-y-0 left-0 w-1 bg-yellow-400 rounded-l-2xl" />
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest pl-3 mb-2">Top 5</p>
