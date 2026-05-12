@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import { saveSetting, loadSetting } from "@/lib/supabase/settings";
 
@@ -45,6 +45,13 @@ interface ExtraItem {
   val: number;
 }
 
+interface CampaignRow {
+  source: "meta" | "tiktok";
+  accountName: string;
+  campaignName: string;
+  spend: number;
+}
+
 type SortKey = "delivered" | "totalOrders" | "sales" | "confRate" | "livRate" | "profits" | "roi" | "netPiece";
 
 const SIMILAR_COLORS = [
@@ -59,6 +66,19 @@ const SIMILAR_COLORS = [
 
 function getBase(name: string): string {
   return name.toLowerCase().replace(/[-_]?tik\s*$/i, "").replace(/\s+/g, " ").trim();
+}
+
+function getDay(offset = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() - offset);
+  return d.toISOString().split("T")[0];
+}
+
+function getMetaResults(actions: { action_type: string; value: string }[] = []) {
+  const r = actions?.find(a =>
+    ["purchase", "omni_purchase", "web_in_store_purchase", "offsite_conversion.fb_pixel_purchase"].includes(a.action_type)
+  );
+  return parseInt(r?.value || "0");
 }
 
 const DEFAULT_EMPLOYEES: Employee[] = [
@@ -91,6 +111,8 @@ export default function ProfitPage() {
   const [adsDollar, setAdsDollar] = useState<Record<string, number>>({});
   const [prixAchat, setPrixAchat] = useState<Record<string, number>>({});
   const [bonus, setBonus] = useState<Record<string, number>>({});
+  // selected campaigns per SKU: { [sku]: CampaignRow[] }
+  const [selectedCampaigns, setSelectedCampaigns] = useState<Record<string, CampaignRow[]>>({});
 
   const [sortKey, setSortKey] = useState<SortKey>("delivered");
   const [sortAsc, setSortAsc] = useState(false);
@@ -113,6 +135,15 @@ export default function ProfitPage() {
 
   const [dataLoaded, setDataLoaded] = useState(false);
 
+  // Campaign popup state
+  const [adsDateFrom, setAdsDateFrom] = useState(getDay(6));
+  const [adsDateTo, setAdsDateTo] = useState(getDay(0));
+  const [allCampaigns, setAllCampaigns] = useState<CampaignRow[]>([]);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const [openPopupSku, setOpenPopupSku] = useState<string | null>(null);
+  const [popupSearch, setPopupSearch] = useState("");
+
+
   // Load from Supabase
   useEffect(() => {
     const init = async () => {
@@ -121,7 +152,6 @@ export default function ProfitPage() {
       const inputs = await loadSetting("pnl_inputs");
 
       if (groups) setManualGroups(groups);
-
       if (ops) {
         if (ops.opSalaries !== undefined) setOpSalaries(ops.opSalaries);
         if (ops.opCrm !== undefined) setOpCrm(ops.opCrm);
@@ -137,13 +167,12 @@ export default function ProfitPage() {
         if (ops.packaging !== undefined) setPackaging(ops.packaging);
         if (ops.confirmedRate !== undefined) setConfirmedRate(ops.confirmedRate);
       }
-
       if (inputs) {
         if (inputs.adsDollar) setAdsDollar(inputs.adsDollar);
         if (inputs.prixAchat) setPrixAchat(inputs.prixAchat);
         if (inputs.bonus) setBonus(inputs.bonus);
+        if (inputs.selectedCampaigns) setSelectedCampaigns(inputs.selectedCampaigns);
       }
-
       setDataLoaded(true);
     };
     init();
@@ -158,8 +187,73 @@ export default function ProfitPage() {
   // Save inputs
   useEffect(() => {
     if (!dataLoaded) return;
-    saveSetting("pnl_inputs", { adsDollar, prixAchat, bonus });
-  }, [adsDollar, prixAchat, bonus, dataLoaded]);
+    saveSetting("pnl_inputs", { adsDollar, prixAchat, bonus, selectedCampaigns });
+  }, [adsDollar, prixAchat, bonus, selectedCampaigns, dataLoaded]);
+
+  // Sync adsDollar from selectedCampaigns
+  useEffect(() => {
+    if (!dataLoaded) return;
+    const newAds: Record<string, number> = { ...adsDollar };
+    Object.entries(selectedCampaigns).forEach(([sku, camps]) => {
+      newAds[sku] = camps.reduce((s, c) => s + c.spend, 0);
+    });
+    setAdsDollar(newAds);
+  }, [selectedCampaigns, dataLoaded]);
+
+  // Close popup on outside click
+useEffect(() => {
+  if (!openPopupSku) return;
+  const handler = (e: MouseEvent) => {
+    const el = document.getElementById(`popup-${openPopupSku}`);
+    if (el && !el.contains(e.target as Node)) {
+      setTimeout(() => {
+        setOpenPopupSku(null);
+        setPopupSearch("");
+      }, 10);
+    }
+  };
+  document.addEventListener("mousedown", handler);
+  return () => document.removeEventListener("mousedown", handler);
+}, [openPopupSku]);
+
+  // Fetch campaigns
+  const fetchCampaigns = async () => {
+    setAdsLoading(true);
+    try {
+      const [metaRes, ttRes] = await Promise.all([
+        fetch(`/api/meta?date_from=${adsDateFrom}&date_to=${adsDateTo}`).then(r => r.json()),
+        fetch(`/api/tiktok?date_from=${adsDateFrom}&date_to=${adsDateTo}`).then(r => r.json()),
+      ]);
+      const rows: CampaignRow[] = [];
+      if (Array.isArray(metaRes)) {
+        metaRes.forEach((acc: any) => {
+          acc.campaigns?.forEach((c: any) => {
+            const spend = parseFloat(c.spend || "0");
+            if (spend > 0.5) rows.push({ source: "meta", accountName: acc.accountName, campaignName: c.campaign_name, spend });
+          });
+        });
+      }
+      if (ttRes?.campaigns) {
+        ttRes.campaigns.forEach((c: any) => {
+          const spend = parseFloat(c.spend || "0");
+          if (spend > 0.5) rows.push({ source: "tiktok", accountName: "TikTok", campaignName: c.campaign_name, spend });
+        });
+      }
+      setAllCampaigns(rows);
+    } catch (e) { console.error(e); }
+    setAdsLoading(false);
+  };
+
+  const toggleCampaign = (sku: string, camp: CampaignRow) => {
+    setSelectedCampaigns(prev => {
+      const current = prev[sku] || [];
+      const exists = current.find(c => c.campaignName === camp.campaignName);
+      const updated = exists
+        ? current.filter(c => c.campaignName !== camp.campaignName)
+        : [...current, camp];
+      return { ...prev, [sku]: updated };
+    });
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -349,6 +443,11 @@ export default function ProfitPage() {
   );
 
   const medals = ["🥇", "🥈", "🥉", "4", "5"];
+
+  const filteredPopupCampaigns = allCampaigns.filter(c =>
+    c.campaignName.toLowerCase().includes(popupSearch.toLowerCase()) ||
+    c.accountName.toLowerCase().includes(popupSearch.toLowerCase())
+  );
 
   return (
     <div className="space-y-4">
@@ -590,7 +689,7 @@ export default function ProfitPage() {
 
       {products.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-50">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 flex-wrap">
             <div className="text-xs font-semibold text-gray-500">{sortedProducts.length} produits</div>
             <button onClick={() => setShowGroupPanel(!showGroupPanel)}
               className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white border border-gray-200 text-gray-500 hover:border-purple-300 hover:text-purple-600 transition-all">
@@ -599,12 +698,30 @@ export default function ProfitPage() {
             <input type="text" placeholder="Rechercher..." value={search}
               onChange={e => setSearch(e.target.value)}
               className="border border-gray-200 rounded-xl px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-purple-400 w-48" />
+            {/* Date range for ads */}
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-[10px] text-gray-400 font-medium">Ads:</span>
+              <input type="date" value={adsDateFrom} onChange={e => setAdsDateFrom(e.target.value)}
+                className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none focus:border-purple-400" />
+              <span className="text-gray-300 text-[10px]">→</span>
+              <input type="date" value={adsDateTo} onChange={e => setAdsDateTo(e.target.value)}
+                className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none focus:border-purple-400" />
+              <button onClick={fetchCampaigns} disabled={adsLoading}
+                className="px-3 py-1 rounded-lg text-[11px] font-medium bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-all flex items-center gap-1">
+                {adsLoading ? <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : "↓"}
+                {adsLoading ? "..." : "Charger"}
+              </button>
+              {allCampaigns.length > 0 && (
+                <span className="text-[10px] text-green-600 font-medium">{allCampaigns.length} camp.</span>
+              )}
+            </div>
           </div>
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-xs">
                 <Th label="Produit" right={false} />
                 <Th label="SKU" right={false} />
+                <th className="px-2 py-3 font-medium text-blue-500 text-left whitespace-nowrap bg-blue-50/50">Campagne</th>
                 <th className="px-3 py-3 font-medium text-amber-600 text-right whitespace-nowrap bg-amber-50">Prix achat</th>
                 <th className="px-3 py-3 font-medium text-amber-600 text-right whitespace-nowrap bg-amber-50">Ads $</th>
                 <th className="px-3 py-3 font-medium text-amber-600 text-right whitespace-nowrap bg-amber-50">Bonus</th>
@@ -636,19 +753,87 @@ export default function ProfitPage() {
                 const c = calcProduct(p);
                 const colorIdx = getSkuColor(p.sku, products);
                 const similarClass = colorIdx !== undefined ? SIMILAR_COLORS[colorIdx] : "";
+                const skuCamps = selectedCampaigns[p.sku] || [];
+                const campLabel = skuCamps.length > 0
+                  ? skuCamps.map(c => c.campaignName.slice(0, 5)).join(", ")
+                  : "";
                 return (
-                  <tr key={i} className={`border-b border-gray-50 hover:brightness-95 transition-all ${similarClass}`}>
+                  <tr key={i} className={`border-b border-gray-50 transition-all ${openPopupSku === p.sku ? "" : "hover:brightness-95"} ${similarClass}`}>
                     <td className="px-4 py-2 font-medium text-gray-700 sticky left-0 bg-white max-w-[150px] truncate" dir="rtl">{p.nomProduit}</td>
                     <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{p.sku}</td>
+
+                    {/* Campagne column */}
+                    <td className="px-2 py-2 bg-blue-50/30 relative">
+                      <div className="flex items-center gap-1">
+<button
+  onMouseDown={e => e.stopPropagation()}
+  onClick={() => {
+    setOpenPopupSku(prev => prev === p.sku ? null : p.sku);
+    setPopupSearch("");
+  }}
+  className="w-5 h-5 rounded bg-blue-100 text-blue-600 hover:bg-blue-200 transition-all flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+  📊
+</button>
+                        {campLabel && (
+                          <span className="text-[9px] text-blue-600 font-medium truncate max-w-[60px] leading-tight">{campLabel}</span>
+                        )}
+                      </div>
+
+                      {/* Popup */}
+                      {openPopupSku === p.sku && (
+<div id={`popup-${p.sku}`}
+  className="absolute left-8 top-7 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-[460px] p-4"                       onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[10px] font-semibold text-gray-600">Choisir campagnes</span>
+                            <button onClick={() => { setOpenPopupSku(null); setPopupSearch(""); }}
+                              className="text-gray-300 hover:text-gray-500 text-xs">✕</button>
+                          </div>
+                          <input type="text" placeholder="Rechercher..." value={popupSearch}
+                            onChange={e => setPopupSearch(e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1 text-[10px] text-gray-700 focus:outline-none focus:border-purple-400 mb-1.5" />
+                          {allCampaigns.length === 0 ? (
+                            <p className="text-[10px] text-gray-400 text-center py-2">Cliquez "Charger" d'abord</p>
+                          ) : (
+                            <div className="max-h-56 overflow-y-auto space-y-0.5">
+                              {filteredPopupCampaigns.map((camp, ci) => {
+                                const isSelected = skuCamps.some(c => c.campaignName === camp.campaignName);
+                                return (
+                                  <label key={ci} className={`flex items-center gap-1.5 px-1.5 py-1 rounded-lg cursor-pointer transition-all ${isSelected ? "bg-blue-50" : "hover:bg-gray-50"}`}>
+                                    <input type="checkbox" checked={isSelected}
+                                      onChange={() => toggleCampaign(p.sku, camp)}
+                                      className="accent-blue-500 w-3 h-3 flex-shrink-0" />
+                                    <div className="min-w-0 flex-1">
+<p className="text-[11px] font-medium text-gray-700 truncate leading-tight">{camp.campaignName}</p>
+<p className="text-[10px] text-gray-400 leading-tight">
+  <span className={camp.source === "meta" ? "text-blue-400" : "text-pink-400"}>{camp.source === "meta" ? camp.accountName : "TikTok"}</span>
+  {" · "}
+  <span className="font-semibold text-blue-600">${camp.spend.toFixed(2)}</span>
+</p>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {skuCamps.length > 0 && (
+                            <div className="mt-1.5 pt-1.5 border-t border-gray-100 flex items-center justify-between">
+                              <span className="text-[9px] text-gray-400">{skuCamps.length} sélectionnée(s)</span>
+                              <span className="text-[9px] font-bold text-blue-600">${skuCamps.reduce((s, c) => s + c.spend, 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
                     <td className="px-3 py-2 bg-amber-50/60">
                       <input type="number" value={prixAchat[p.sku] || ""}
                         onChange={e => setPrixAchat(prev => ({ ...prev, [p.sku]: Number(e.target.value) || 0 }))}
                         className="w-16 text-right bg-white border border-amber-200 rounded-lg px-1 py-0.5 text-gray-700 focus:outline-none focus:border-amber-400" placeholder="0" />
                     </td>
                     <td className="px-3 py-2 bg-amber-50/60">
-                      <input type="number" value={adsDollar[p.sku] || ""}
-                        onChange={e => setAdsDollar(prev => ({ ...prev, [p.sku]: Number(e.target.value) || 0 }))}
-                        className="w-16 text-right bg-white border border-amber-200 rounded-lg px-1 py-0.5 text-blue-600 font-medium focus:outline-none focus:border-amber-400" placeholder="0" />
+                      <div className="w-16 text-right text-blue-600 font-medium text-xs px-1 py-0.5 bg-blue-50 rounded-lg border border-blue-100 tabular-nums">
+                        {adsDollar[p.sku] ? `$${adsDollar[p.sku].toFixed(2)}` : "—"}
+                      </div>
                     </td>
                     <td className="px-3 py-2 bg-amber-50/60">
                       <input type="number" value={bonus[p.sku] || ""}
