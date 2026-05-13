@@ -74,13 +74,6 @@ function getDay(offset = 0) {
   return d.toISOString().split("T")[0];
 }
 
-function getMetaResults(actions: { action_type: string; value: string }[] = []) {
-  const r = actions?.find(a =>
-    ["purchase", "omni_purchase", "web_in_store_purchase", "offsite_conversion.fb_pixel_purchase"].includes(a.action_type)
-  );
-  return parseInt(r?.value || "0");
-}
-
 const DEFAULT_EMPLOYEES: Employee[] = [
   { id: "e1", name: "Ayach", val: 46060 },
   { id: "e2", name: "Fares", val: 35365 },
@@ -111,7 +104,6 @@ export default function ProfitPage() {
   const [adsDollar, setAdsDollar] = useState<Record<string, number>>({});
   const [prixAchat, setPrixAchat] = useState<Record<string, number>>({});
   const [bonus, setBonus] = useState<Record<string, number>>({});
-  // selected campaigns per SKU: { [sku]: CampaignRow[] }
   const [selectedCampaigns, setSelectedCampaigns] = useState<Record<string, CampaignRow[]>>({});
 
   const [sortKey, setSortKey] = useState<SortKey>("delivered");
@@ -135,22 +127,20 @@ export default function ProfitPage() {
 
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Campaign popup state
   const [adsDateFrom, setAdsDateFrom] = useState(getDay(6));
   const [adsDateTo, setAdsDateTo] = useState(getDay(0));
   const [allCampaigns, setAllCampaigns] = useState<CampaignRow[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
   const [openPopupSku, setOpenPopupSku] = useState<string | null>(null);
   const [popupSearch, setPopupSearch] = useState("");
+  const [popupPos, setPopupPos] = useState({ top: 0, left: 0 });
+  const popupRef = useRef<HTMLDivElement>(null);
 
-
-  // Load from Supabase
   useEffect(() => {
     const init = async () => {
       const groups = await loadSetting("pnl_groups");
       const ops = await loadSetting("pnl_ops");
       const inputs = await loadSetting("pnl_inputs");
-
       if (groups) setManualGroups(groups);
       if (ops) {
         if (ops.opSalaries !== undefined) setOpSalaries(ops.opSalaries);
@@ -178,19 +168,16 @@ export default function ProfitPage() {
     init();
   }, []);
 
-  // Save ops
   useEffect(() => {
     if (!dataLoaded) return;
     saveSetting("pnl_ops", { opSalaries, opCrm, opRent, opUtilities, opBonus, offTaqkid, offSohfa, offTswiq, employees, extras, dollarRate, packaging, confirmedRate });
   }, [opSalaries, opCrm, opRent, opUtilities, opBonus, offTaqkid, offSohfa, offTswiq, employees, extras, dollarRate, packaging, confirmedRate, dataLoaded]);
 
-  // Save inputs
   useEffect(() => {
     if (!dataLoaded) return;
     saveSetting("pnl_inputs", { adsDollar, prixAchat, bonus, selectedCampaigns });
   }, [adsDollar, prixAchat, bonus, selectedCampaigns, dataLoaded]);
 
-  // Sync adsDollar from selectedCampaigns
   useEffect(() => {
     if (!dataLoaded) return;
     const newAds: Record<string, number> = { ...adsDollar };
@@ -200,23 +187,18 @@ export default function ProfitPage() {
     setAdsDollar(newAds);
   }, [selectedCampaigns, dataLoaded]);
 
-  // Close popup on outside click
-useEffect(() => {
-  if (!openPopupSku) return;
-  const handler = (e: MouseEvent) => {
-    const el = document.getElementById(`popup-${openPopupSku}`);
-    if (el && !el.contains(e.target as Node)) {
-      setTimeout(() => {
+  useEffect(() => {
+    if (!openPopupSku) return;
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
         setOpenPopupSku(null);
         setPopupSearch("");
-      }, 10);
-    }
-  };
-  document.addEventListener("mousedown", handler);
-  return () => document.removeEventListener("mousedown", handler);
-}, [openPopupSku]);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openPopupSku]);
 
-  // Fetch campaigns
   const fetchCampaigns = async () => {
     setAdsLoading(true);
     try {
@@ -248,9 +230,7 @@ useEffect(() => {
     setSelectedCampaigns(prev => {
       const current = prev[sku] || [];
       const exists = current.find(c => c.campaignName === camp.campaignName);
-      const updated = exists
-        ? current.filter(c => c.campaignName !== camp.campaignName)
-        : [...current, camp];
+      const updated = exists ? current.filter(c => c.campaignName !== camp.campaignName) : [...current, camp];
       return { ...prev, [sku]: updated };
     });
   };
@@ -444,10 +424,18 @@ useEffect(() => {
 
   const medals = ["🥇", "🥈", "🥉", "4", "5"];
 
-  const filteredPopupCampaigns = allCampaigns.filter(c =>
-    c.campaignName.toLowerCase().includes(popupSearch.toLowerCase()) ||
-    c.accountName.toLowerCase().includes(popupSearch.toLowerCase())
-  );
+  const skuCampsForPopup = openPopupSku ? (selectedCampaigns[openPopupSku] || []) : [];
+
+  const filteredPopupCampaigns = [...allCampaigns]
+    .filter(c =>
+      c.campaignName.toLowerCase().includes(popupSearch.toLowerCase()) ||
+      c.accountName.toLowerCase().includes(popupSearch.toLowerCase())
+    )
+    .sort((a, b) => {
+      const aSelected = skuCampsForPopup.some(c => c.campaignName === a.campaignName) ? 0 : 1;
+      const bSelected = skuCampsForPopup.some(c => c.campaignName === b.campaignName) ? 0 : 1;
+      return aSelected - bSelected;
+    });
 
   return (
     <div className="space-y-4">
@@ -698,7 +686,6 @@ useEffect(() => {
             <input type="text" placeholder="Rechercher..." value={search}
               onChange={e => setSearch(e.target.value)}
               className="border border-gray-200 rounded-xl px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-purple-400 w-48" />
-            {/* Date range for ads */}
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-[10px] text-gray-400 font-medium">Ads:</span>
               <input type="date" value={adsDateFrom} onChange={e => setAdsDateFrom(e.target.value)}
@@ -721,7 +708,14 @@ useEffect(() => {
               <tr className="border-b border-gray-100 bg-gray-50 text-xs">
                 <Th label="Produit" right={false} />
                 <Th label="SKU" right={false} />
-                <th className="px-2 py-3 font-medium text-blue-500 text-left whitespace-nowrap bg-blue-50/50">Campagne</th>
+                <th className="px-2 py-3 font-medium text-blue-500 text-left whitespace-nowrap bg-blue-50/50">
+  Campagne
+  {Object.values(selectedCampaigns).flat().length > 0 && (
+    <span className="ml-1 text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded-md">
+      {Object.values(selectedCampaigns).flat().length}
+    </span>
+  )}
+</th>
                 <th className="px-3 py-3 font-medium text-amber-600 text-right whitespace-nowrap bg-amber-50">Prix achat</th>
                 <th className="px-3 py-3 font-medium text-amber-600 text-right whitespace-nowrap bg-amber-50">Ads $</th>
                 <th className="px-3 py-3 font-medium text-amber-600 text-right whitespace-nowrap bg-amber-50">Bonus</th>
@@ -754,77 +748,28 @@ useEffect(() => {
                 const colorIdx = getSkuColor(p.sku, products);
                 const similarClass = colorIdx !== undefined ? SIMILAR_COLORS[colorIdx] : "";
                 const skuCamps = selectedCampaigns[p.sku] || [];
-                const campLabel = skuCamps.length > 0
-                  ? skuCamps.map(c => c.campaignName.slice(0, 5)).join(", ")
-                  : "";
+                const campLabel = skuCamps.length > 0 ? skuCamps.map(c => c.campaignName.slice(0, 5)).join(", ") : "";
                 return (
-                  <tr key={i} className={`border-b border-gray-50 transition-all ${openPopupSku === p.sku ? "" : "hover:brightness-95"} ${similarClass}`}>
+                  <tr key={i} className={`border-b border-gray-50 hover:brightness-95 transition-all ${similarClass}`}>
                     <td className="px-4 py-2 font-medium text-gray-700 sticky left-0 bg-white max-w-[150px] truncate" dir="rtl">{p.nomProduit}</td>
                     <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{p.sku}</td>
-
-                    {/* Campagne column */}
-                    <td className="px-2 py-2 bg-blue-50/30 relative">
+                    <td className="px-2 py-2 bg-blue-50/30">
                       <div className="flex items-center gap-1">
-<button
-  onMouseDown={e => e.stopPropagation()}
-  onClick={() => {
-    setOpenPopupSku(prev => prev === p.sku ? null : p.sku);
-    setPopupSearch("");
-  }}
-  className="w-5 h-5 rounded bg-blue-100 text-blue-600 hover:bg-blue-200 transition-all flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-  📊
-</button>
+                        <button
+                          onClick={(e) => {
+                            const rect = (e.target as HTMLElement).getBoundingClientRect();
+                            setPopupPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
+                            setOpenPopupSku(prev => prev === p.sku ? null : p.sku);
+                            setPopupSearch("");
+                          }}
+                          className="w-5 h-5 rounded bg-blue-100 text-blue-600 hover:bg-blue-200 transition-all flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                          📊
+                        </button>
                         {campLabel && (
                           <span className="text-[9px] text-blue-600 font-medium truncate max-w-[60px] leading-tight">{campLabel}</span>
                         )}
                       </div>
-
-                      {/* Popup */}
-                      {openPopupSku === p.sku && (
-<div id={`popup-${p.sku}`}
-  className="absolute left-8 top-7 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-[460px] p-4"                       onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[10px] font-semibold text-gray-600">Choisir campagnes</span>
-                            <button onClick={() => { setOpenPopupSku(null); setPopupSearch(""); }}
-                              className="text-gray-300 hover:text-gray-500 text-xs">✕</button>
-                          </div>
-                          <input type="text" placeholder="Rechercher..." value={popupSearch}
-                            onChange={e => setPopupSearch(e.target.value)}
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 text-[10px] text-gray-700 focus:outline-none focus:border-purple-400 mb-1.5" />
-                          {allCampaigns.length === 0 ? (
-                            <p className="text-[10px] text-gray-400 text-center py-2">Cliquez "Charger" d'abord</p>
-                          ) : (
-                            <div className="max-h-56 overflow-y-auto space-y-0.5">
-                              {filteredPopupCampaigns.map((camp, ci) => {
-                                const isSelected = skuCamps.some(c => c.campaignName === camp.campaignName);
-                                return (
-                                  <label key={ci} className={`flex items-center gap-1.5 px-1.5 py-1 rounded-lg cursor-pointer transition-all ${isSelected ? "bg-blue-50" : "hover:bg-gray-50"}`}>
-                                    <input type="checkbox" checked={isSelected}
-                                      onChange={() => toggleCampaign(p.sku, camp)}
-                                      className="accent-blue-500 w-3 h-3 flex-shrink-0" />
-                                    <div className="min-w-0 flex-1">
-<p className="text-[11px] font-medium text-gray-700 truncate leading-tight">{camp.campaignName}</p>
-<p className="text-[10px] text-gray-400 leading-tight">
-  <span className={camp.source === "meta" ? "text-blue-400" : "text-pink-400"}>{camp.source === "meta" ? camp.accountName : "TikTok"}</span>
-  {" · "}
-  <span className="font-semibold text-blue-600">${camp.spend.toFixed(2)}</span>
-</p>
-                                    </div>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {skuCamps.length > 0 && (
-                            <div className="mt-1.5 pt-1.5 border-t border-gray-100 flex items-center justify-between">
-                              <span className="text-[9px] text-gray-400">{skuCamps.length} sélectionnée(s)</span>
-                              <span className="text-[9px] font-bold text-blue-600">${skuCamps.reduce((s, c) => s + c.spend, 0).toFixed(2)}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </td>
-
                     <td className="px-3 py-2 bg-amber-50/60">
                       <input type="number" value={prixAchat[p.sku] || ""}
                         onChange={e => setPrixAchat(prev => ({ ...prev, [p.sku]: Number(e.target.value) || 0 }))}
@@ -873,6 +818,77 @@ useEffect(() => {
         <div className="flex flex-col items-center justify-center h-64 gap-3 text-gray-300">
           <div className="text-5xl">📊</div>
           <div className="text-sm">Importez un fichier Excel pour commencer</div>
+        </div>
+      )}
+
+      {/* POPUP خارج الجدول كامل */}
+      {openPopupSku && (
+        <div
+          ref={popupRef}
+          style={{ position: "absolute", top: popupPos.top, left: popupPos.left, zIndex: 9999 }}
+          className="bg-white border border-gray-200 rounded-xl shadow-xl w-[460px] p-4"
+          onMouseDown={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-gray-700">Choisir campagnes</span>
+              {allCampaigns.length > 0 && (
+                <span className="text-[9px] bg-blue-100 text-blue-600 font-bold px-1.5 py-0.5 rounded-md">
+                  {skuCampsForPopup.length} / {allCampaigns.length}
+                </span>
+              )}
+            </div>
+            <button onClick={() => { setOpenPopupSku(null); setPopupSearch(""); }}
+              className="text-gray-300 hover:text-gray-500 text-xs">✕</button>
+          </div>
+          <input type="text" placeholder="Rechercher..." value={popupSearch}
+            onChange={e => setPopupSearch(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-purple-400 mb-2" />
+          {allCampaigns.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-3">Cliquez "Charger" d'abord</p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto space-y-0.5">
+              {filteredPopupCampaigns.map((camp, ci) => {
+                const isSelected = skuCampsForPopup.some(c => c.campaignName === camp.campaignName);
+const isUsedElsewhere = !isSelected && Object.entries(selectedCampaigns).some(([sk, camps]) => 
+  sk !== openPopupSku && camps.some(c => c.campaignName === camp.campaignName)
+);
+                return (
+<label key={ci} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${
+  isSelected ? "bg-blue-50 border border-blue-100 cursor-pointer" : 
+  isUsedElsewhere ? "opacity-40 cursor-not-allowed" : 
+  "hover:bg-gray-50 cursor-pointer"
+}`}>
+  <input type="checkbox" checked={isSelected}
+    disabled={isUsedElsewhere}
+    onChange={() => !isUsedElsewhere && toggleCampaign(openPopupSku, camp)}
+    className="accent-blue-500 w-3 h-3 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium text-gray-700 truncate leading-tight">{camp.campaignName}</p>
+                      <p className="text-[10px] text-gray-400 leading-tight">
+                        <span className={camp.source === "meta" ? "text-blue-400" : "text-pink-400"}>
+                          {camp.source === "meta" ? camp.accountName : "TikTok"}
+                        </span>
+                        {" · "}
+                        <span className="font-semibold text-blue-600">${camp.spend.toFixed(2)}</span>
+                      </p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {skuCampsForPopup.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
+              <button
+                onClick={() => setSelectedCampaigns(prev => ({ ...prev, [openPopupSku]: [] }))}
+                className="text-[10px] text-red-400 hover:text-red-600 font-medium transition-all">
+                🗑 Reset
+              </button>
+              <span className="text-[10px] font-bold text-blue-600">
+                ${skuCampsForPopup.reduce((s, c) => s + c.spend, 0).toFixed(2)}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
