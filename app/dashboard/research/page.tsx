@@ -1,298 +1,286 @@
 "use client";
 
-import { useState } from "react";
-
-const PRESET_PAGES = [
-  "Shein Algeria",
-  "Jumia Algeria",
-  "Ouedkniss",
-  "DZ Shop",
-  "Algeria Store",
-];
+import { useState, useRef, useEffect } from "react";
 
 type Stage = "prospecting" | "research" | "testing" | "winner" | "loser";
 
-interface Product {
-  id: string;
-  name: string;
-  image?: string;
-  price?: string;
-  stage: Stage;
-  daysAgo?: number;
-  adsCount?: number;
-  description?: string;
-}
+interface PageEntry { id: string; label: string; url: string; }
+interface Product   { id: string; name: string; image: string; price: string; stage: Stage; note: string; }
 
-const STAGES: { key: Stage; label: string; icon: string; color: string; bg: string; border: string }[] = [
-  { key: "prospecting", label: "PROSPECTING", icon: "🔍", color: "text-gray-600", bg: "bg-gray-50", border: "border-gray-200" },
-  { key: "research",    label: "RESEARCH",    icon: "📊", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
-  { key: "testing",     label: "TESTING",     icon: "🧪", color: "text-green-600", bg: "bg-green-50", border: "border-green-200" },
-  { key: "winner",      label: "WINNER",      icon: "🏆", color: "text-yellow-600", bg: "bg-yellow-50", border: "border-yellow-200" },
-  { key: "loser",       label: "LOSER",       icon: "❌", color: "text-red-500", bg: "bg-red-50", border: "border-red-200" },
+const PRESETS: PageEntry[] = [
+  { id: "pre1", label: "Meta Ad Library – DZ",    url: "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=DZ" },
+  { id: "pre2", label: "TikTok Creative Center",   url: "https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en" },
+  { id: "pre3", label: "AliExpress Trending",      url: "https://www.aliexpress.com/category/trending" },
+  { id: "pre4", label: "Jumia Algeria",             url: "https://www.jumia.com.dz" },
+  { id: "pre5", label: "Ouedkniss",                 url: "https://www.ouedkniss.com" },
+  { id: "pre6", label: "Shein Algeria",             url: "https://www.shein.com/ar/algeria" },
+  { id: "pre7", label: "Facebook – DZ Shop",       url: "https://www.facebook.com/search/top?q=dz+shop+algeria" },
+  { id: "pre8", label: "Minea",                     url: "https://minea.com" },
 ];
 
+const STAGES: { key: Stage; label: string; emoji: string; accent: string; soft: string; dot: string }[] = [
+  { key: "prospecting", label: "Prospecting", emoji: "🔍", accent: "text-slate-600",  soft: "bg-slate-50 border-slate-200",    dot: "bg-slate-400"  },
+  { key: "research",    label: "Research",    emoji: "📊", accent: "text-blue-600",   soft: "bg-blue-50 border-blue-200",      dot: "bg-blue-500"   },
+  { key: "testing",     label: "Testing",     emoji: "🧪", accent: "text-violet-600", soft: "bg-violet-50 border-violet-200",  dot: "bg-violet-500" },
+  { key: "winner",      label: "Winner",      emoji: "🏆", accent: "text-amber-600",  soft: "bg-amber-50 border-amber-200",    dot: "bg-amber-400"  },
+  { key: "loser",       label: "Loser",       emoji: "✕",  accent: "text-red-500",    soft: "bg-red-50 border-red-200",        dot: "bg-red-400"    },
+];
+
+function normalizeUrl(raw: string) {
+  const s = raw.trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.includes(".")) return `https://${s}`;
+  return `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=DZ&q=${encodeURIComponent(s)}`;
+}
+
 export default function ProductResearchPage() {
-  const [pages, setPages] = useState<string[]>([]);
-  const [input, setInput] = useState("");
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: "", image: "", price: "", stage: "prospecting" as Stage });
+  const [pages, setPages]       = useState<PageEntry[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(localStorage.getItem("pr_pages") || "[]"); } catch { return []; }
+  });
+  const [products, setProducts] = useState<Product[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(localStorage.getItem("pr_products") || "[]"); } catch { return []; }
+  });
+  const [labelIn, setLabel]     = useState("");
+  const [urlIn, setUrl]         = useState("");
+  const [openMsg, setOpenMsg]   = useState("");
+  const [dragId, setDragId]     = useState<string | null>(null);
+  const [modal, setModal]       = useState(false);
+  const [newP, setNewP]         = useState<Omit<Product,"id">>({ name:"", image:"", price:"", stage:"prospecting", note:"" });
+  const labelRef                = useRef<HTMLInputElement>(null);
 
-  const addPage = () => {
-    const val = input.trim();
-    if (!val || pages.includes(val)) return;
-    setPages(prev => [...prev, val]);
-    setInput("");
-  };
+  useEffect(() => { localStorage.setItem("pr_pages",    JSON.stringify(pages));    }, [pages]);
+  useEffect(() => { localStorage.setItem("pr_products", JSON.stringify(products)); }, [products]);
 
-  const removePage = (p: string) => setPages(prev => prev.filter(x => x !== p));
-  const addPreset = (p: string) => { if (!pages.includes(p)) setPages(prev => [...prev, p]); };
-
-  const handleStart = async () => {
-    if (pages.length === 0) return;
-    setLoading(true);
-    try {
-      const res = await fetch("/api/research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pages }),
-      });
-      const data = await res.json();
-      if (data.products) {
-        const newProducts: Product[] = data.products.map((p: any) => ({
-          id: Date.now().toString() + Math.random(),
-          name: p.name,
-          image: p.image,
-          price: p.price,
-          description: p.description,
-          stage: "prospecting",
-          daysAgo: 0,
-          adsCount: 0,
-        }));
-        setProducts(prev => [...prev, ...newProducts]);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setLoading(false);
-  };
-
-  const handleDragStart = (id: string) => setDragId(id);
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
-  const handleDrop = (stage: Stage) => {
+  function addPage() {
+    const url   = normalizeUrl(urlIn || labelIn);
+    const label = labelIn.trim() || urlIn.trim();
+    if (!label || !url || pages.find(p => p.url === url)) return;
+    setPages(prev => [...prev, { id: Date.now().toString(), label, url }]);
+    setLabel(""); setUrl(""); labelRef.current?.focus();
+  }
+  function togglePreset(pr: PageEntry) {
+    setPages(prev => prev.find(p => p.id === pr.id) ? prev.filter(p => p.id !== pr.id) : [...prev, pr]);
+  }
+  function openAll() {
+    if (!pages.length) return;
+    pages.forEach(p => window.open(p.url, "_blank", "noopener,noreferrer"));
+    setOpenMsg(`✓ ${pages.length} onglet${pages.length > 1 ? "s" : ""} ouvert${pages.length > 1 ? "s" : ""}`);
+    setTimeout(() => setOpenMsg(""), 3000);
+  }
+  function addProduct() {
+    if (!newP.name.trim()) return;
+    setProducts(prev => [...prev, { ...newP, id: Date.now().toString() }]);
+    setNewP({ name:"", image:"", price:"", stage:"prospecting", note:"" });
+    setModal(false);
+  }
+  function onDrop(stage: Stage) {
     if (!dragId) return;
     setProducts(prev => prev.map(p => p.id === dragId ? { ...p, stage } : p));
     setDragId(null);
-  };
-
-  const handleAddProduct = () => {
-    if (!newProduct.name.trim()) return;
-    setProducts(prev => [...prev, {
-      id: Date.now().toString(),
-      name: newProduct.name,
-      image: newProduct.image,
-      price: newProduct.price,
-      stage: newProduct.stage,
-      daysAgo: 0,
-      adsCount: 0,
-    }]);
-    setNewProduct({ name: "", image: "", price: "", stage: "prospecting" });
-    setShowAddModal(false);
-  };
-
-  const removeProduct = (id: string) => setProducts(prev => prev.filter(p => p.id !== id));
-  const totalByStage = (stage: Stage) => products.filter(p => p.stage === stage).length;
+  }
+  const byStage = (s: Stage) => products.filter(p => p.stage === s);
 
   return (
-    <div className="space-y-4">
+    <div className="min-h-screen bg-white">
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900">🔍 Product Research</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Découvrez, analysez et scalez vos produits gagnants</p>
-        </div>
-        <button onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-2xl text-sm font-medium hover:bg-purple-700 transition-all shadow-sm shadow-purple-200">
-          + Ajouter un produit
-        </button>
-      </div>
-
-      {/* Stats bar */}
-      <div className="flex gap-3">
-        {[
-          { label: "Total", value: products.length, bg: "bg-gray-100", color: "text-gray-700", icon: "⊞" },
-          { label: "Prospecting", value: totalByStage("prospecting"), bg: "bg-gray-50", color: "text-gray-600", icon: "🔍" },
-          { label: "Research", value: totalByStage("research"), bg: "bg-blue-50", color: "text-blue-600", icon: "📊" },
-          { label: "Winners", value: totalByStage("winner"), bg: "bg-yellow-50", color: "text-yellow-600", icon: "🏆" },
-          { label: "Losers", value: totalByStage("loser"), bg: "bg-red-50", color: "text-red-500", icon: "❌" },
-          { label: "Testing", value: totalByStage("testing"), bg: "bg-green-50", color: "text-green-600", icon: "🧪" },
-        ].map(s => (
-          <div key={s.label} className={`flex items-center gap-2 px-4 py-2 rounded-xl ${s.bg} border border-gray-100`}>
-            <span className="text-sm">{s.icon}</span>
-            <div>
-              <div className={`text-lg font-bold ${s.color} leading-none`}>{s.value}</div>
-              <div className="text-[10px] text-gray-400">{s.label}</div>
-            </div>
+      {/* HEADER */}
+      <div className="px-6 pt-6">
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">🔍 Product Research</h1>
+            <p className="text-sm text-gray-400 mt-0.5">Ouvrez vos sources en un clic · analysez · classez</p>
           </div>
-        ))}
-      </div>
-
-      {/* Search panel */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Recherche par Claude AI</p>
-        <div className="flex gap-2">
-          <input type="text" value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && addPage()}
-            placeholder="Nom de la page Facebook..."
-            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-purple-400" />
-          <button onClick={addPage}
-            className="px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 transition-all">
-            +
+          <button onClick={() => setModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-xl transition-colors">
+            + Ajouter un produit
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {PRESET_PAGES.map(p => (
-            <button key={p} onClick={() => addPreset(p)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
-                pages.includes(p)
-                  ? "bg-purple-50 border-purple-200 text-purple-600"
-                  : "bg-gray-50 border-gray-200 text-gray-500 hover:border-purple-300 hover:text-purple-500"
-              }`}>
-              {p}
-            </button>
+        <div className="flex gap-2 mb-6 flex-wrap">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg">
+            <span className="text-xs text-gray-500">Total</span>
+            <span className="text-sm font-semibold text-gray-800">{products.length}</span>
+          </div>
+          {STAGES.map(s => (
+            <div key={s.key} className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg ${s.soft}`}>
+              <span className="text-xs">{s.emoji}</span>
+              <span className={`text-xs ${s.accent}`}>{s.label}</span>
+              <span className={`text-sm font-semibold ${s.accent}`}>{byStage(s.key).length}</span>
+            </div>
           ))}
         </div>
-
-        {pages.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {pages.map((p, i) => (
-              <div key={p} className="flex items-center gap-1.5 bg-purple-50 border border-purple-200 rounded-xl px-3 py-1.5">
-                <span className="text-xs font-semibold text-purple-400">{i + 1}</span>
-                <span className="text-xs text-purple-700">{p}</span>
-                <button onClick={() => removePage(p)} className="text-purple-300 hover:text-red-400 text-sm leading-none ml-1">×</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <button onClick={handleStart} disabled={pages.length === 0 || loading}
-          className="w-full py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-          {loading ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Claude analyse...
-            </>
-          ) : (
-            <>🔍 Start — Analyser avec Claude</>
-          )}
-        </button>
       </div>
 
-      {/* Kanban board */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        {STAGES.map(stage => (
-          <div key={stage.key} onDragOver={handleDragOver} onDrop={() => handleDrop(stage.key)}
-            className="flex-shrink-0 w-56 flex flex-col gap-2">
-            <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${stage.bg} border ${stage.border}`}>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm">{stage.icon}</span>
-                <span className={`text-xs font-bold ${stage.color} tracking-wide`}>{stage.label}</span>
-              </div>
-              <span className={`text-xs font-bold ${stage.color} bg-white rounded-lg px-2 py-0.5 border ${stage.border}`}>
-                {totalByStage(stage.key)}
-              </span>
-            </div>
+      {/* SOURCES PANEL */}
+      <div className="mx-6 mb-6 border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">🌐</span>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Sources</span>
+            {pages.length > 0 && (
+              <span className="text-xs bg-purple-100 text-purple-600 font-semibold px-2 py-0.5 rounded-full">{pages.length}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {openMsg && <span className="text-xs text-green-600 font-medium">{openMsg}</span>}
+            <button onClick={openAll} disabled={!pages.length}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl transition-all">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+              Ouvrir tout ({pages.length})
+            </button>
+          </div>
+        </div>
 
-            <div className="flex flex-col gap-2 min-h-[200px]">
-              {products.filter(p => p.stage === stage.key).map(product => (
-                <div key={product.id} draggable onDragStart={() => handleDragStart(product.id)}
-                  className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden cursor-grab active:cursor-grabbing hover:shadow-md transition-all group relative">
-                  <div className="relative w-full h-36 bg-gray-100">
-                    {product.image ? (
-                      <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-300 text-3xl">🖼</div>
-                    )}
-                    <button onClick={() => removeProduct(product.id)}
-                      className="absolute top-1.5 right-1.5 w-6 h-6 bg-white rounded-full shadow text-gray-400 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
-                      ×
-                    </button>
-                    {product.adsCount !== undefined && product.adsCount > 0 && (
-                      <div className="absolute bottom-1.5 left-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-lg">
-                        📋 {product.adsCount}
-                      </div>
-                    )}
-                    {product.daysAgo !== undefined && product.daysAgo > 0 && (
-                      <div className="absolute bottom-1.5 right-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-lg">
-                        🕐 {product.daysAgo}j
-                      </div>
-                    )}
+        <div className="p-4 space-y-4">
+          <div className="flex gap-2">
+            <input ref={labelRef} value={labelIn} onChange={e => setLabel(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addPage()}
+              placeholder="Nom de page / URL..."
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400 placeholder-gray-300"/>
+            <input value={urlIn} onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addPage()}
+              placeholder="URL (optionnel)"
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400 placeholder-gray-300"/>
+            <button onClick={addPage}
+              className="px-4 py-2 bg-gray-900 hover:bg-gray-700 text-white rounded-xl text-sm font-semibold transition-colors">
+              + Ajouter
+            </button>
+          </div>
+
+          <div>
+            <p className="text-[11px] text-gray-400 uppercase tracking-widest mb-2 font-medium">Raccourcis rapides</p>
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map(pr => {
+                const active = !!pages.find(p => p.id === pr.id);
+                return (
+                  <button key={pr.id} onClick={() => togglePreset(pr)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                      active ? "bg-purple-600 border-purple-600 text-white" : "bg-white border-gray-200 text-gray-500 hover:border-purple-300 hover:text-purple-600"
+                    }`}>
+                    {pr.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {pages.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[11px] text-gray-400 uppercase tracking-widest font-medium">Sélectionnés</p>
+              {pages.map((p, i) => (
+                <div key={p.id} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-xl border border-gray-100 group">
+                  <span className="text-[11px] font-bold text-gray-300 w-4 shrink-0 text-right">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-700 truncate">{p.label}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{p.url}</p>
                   </div>
-                  <div className="px-3 py-2">
-                    <p className="text-xs font-semibold text-gray-800 truncate">{product.name}</p>
-                    {product.price && <p className="text-xs text-gray-400 mt-0.5">{product.price}</p>}
-                    {product.description && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{product.description}</p>}
-                  </div>
+                  <a href={p.url} target="_blank" rel="noopener noreferrer"
+                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-purple-600 transition-all shrink-0">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                  </a>
+                  <button onClick={() => setPages(prev => prev.filter(x => x.id !== p.id))}
+                    className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 text-lg leading-none transition-all shrink-0">×</button>
                 </div>
               ))}
-
-              {products.filter(p => p.stage === stage.key).length === 0 && (
-                <div className={`border-2 border-dashed ${stage.border} rounded-2xl h-24 flex items-center justify-center`}>
-                  <p className="text-xs text-gray-300">Drop here</p>
-                </div>
-              )}
             </div>
-          </div>
-        ))}
+          )}
+        </div>
       </div>
 
-      {/* Add product modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
-          <div className="bg-white rounded-2xl p-5 w-96 shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-900">Ajouter un produit</p>
-              <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+      {/* KANBAN */}
+      <div className="px-6 pb-8">
+        <p className="text-[11px] text-gray-400 uppercase tracking-widest font-medium mb-3">Pipeline produits</p>
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {STAGES.map(stage => (
+            <div key={stage.key} onDragOver={e => e.preventDefault()} onDrop={() => onDrop(stage.key)}
+              className="flex-shrink-0 w-52 flex flex-col gap-2">
+              <div className={`flex items-center justify-between px-3 py-2 rounded-xl border ${stage.soft}`}>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">{stage.emoji}</span>
+                  <span className={`text-[11px] font-bold tracking-wider uppercase ${stage.accent}`}>{stage.label}</span>
+                </div>
+                <span className={`text-xs font-bold ${stage.accent} bg-white rounded-lg px-2 py-0.5 border ${stage.soft.split(" ")[1]}`}>
+                  {byStage(stage.key).length}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2 min-h-[160px]">
+                {byStage(stage.key).map(product => (
+                  <div key={product.id} draggable onDragStart={() => setDragId(product.id)}
+                    className="bg-white rounded-2xl border border-gray-100 overflow-hidden cursor-grab active:cursor-grabbing hover:border-purple-200 hover:shadow-md transition-all group">
+                    <div className="relative h-32 bg-gray-50">
+                      {product.image
+                        ? <img src={product.image} alt={product.name} className="w-full h-full object-cover"/>
+                        : <div className="w-full h-full flex items-center justify-center text-gray-200 text-3xl">🖼</div>
+                      }
+                      <button onClick={() => setProducts(prev => prev.filter(p => p.id !== product.id))}
+                        className="absolute top-1.5 right-1.5 w-6 h-6 bg-white rounded-full border border-gray-200 text-gray-400 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center shadow-sm">
+                        ×
+                      </button>
+                      <div className={`absolute bottom-1.5 left-1.5 w-2 h-2 rounded-full ${stage.dot}`}/>
+                    </div>
+                    <div className="px-3 py-2.5">
+                      <p className="text-xs font-semibold text-gray-800 truncate">{product.name}</p>
+                      {product.price && <p className="text-xs text-purple-600 font-medium mt-0.5">{product.price}</p>}
+                      {product.note  && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{product.note}</p>}
+                    </div>
+                  </div>
+                ))}
+                {byStage(stage.key).length === 0 && (
+                  <div className={`border-2 border-dashed ${stage.soft.split(" ")[1]} rounded-2xl h-20 flex items-center justify-center`}>
+                    <p className="text-[11px] text-gray-300">Glisser ici</p>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Nom du produit</label>
-                <input type="text" value={newProduct.name}
-                  onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Image URL</label>
-                <input type="text" value={newProduct.image}
-                  onChange={e => setNewProduct(p => ({ ...p, image: e.target.value }))}
-                  placeholder="https://..."
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Prix</label>
-                <input type="text" value={newProduct.price}
-                  onChange={e => setNewProduct(p => ({ ...p, price: e.target.value }))}
-                  placeholder="$0.00"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400" />
-              </div>
+          ))}
+        </div>
+      </div>
+
+      {/* MODAL */}
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{background:"rgba(0,0,0,0.25)"}}
+          onClick={() => setModal(false)}>
+          <div className="bg-white rounded-2xl w-96 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <p className="text-sm font-semibold text-gray-900">Nouveau produit</p>
+              <button onClick={() => setModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+            <div className="p-5 space-y-3">
+              {([
+                { label:"Nom du produit *", key:"name",  ph:"Ex: Ceinture sport femme" },
+                { label:"Image URL",        key:"image", ph:"https://..." },
+                { label:"Prix",             key:"price", ph:"2 500 DA" },
+                { label:"Note",             key:"note",  ph:"Observation rapide..." },
+              ] as const).map(f => (
+                <div key={f.key}>
+                  <label className="text-xs text-gray-400 mb-1 block">{f.label}</label>
+                  <input value={(newP as any)[f.key]}
+                    onChange={e => setNewP(p => ({ ...p, [f.key]: e.target.value }))}
+                    placeholder={f.ph}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400"/>
+                </div>
+              ))}
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Stage</label>
-                <select value={newProduct.stage}
-                  onChange={e => setNewProduct(p => ({ ...p, stage: e.target.value as Stage }))}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400">
-                  {STAGES.map(s => <option key={s.key} value={s.key}>{s.icon} {s.label}</option>)}
+                <select value={newP.stage} onChange={e => setNewP(p => ({ ...p, stage: e.target.value as Stage }))}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400">
+                  {STAGES.map(s => <option key={s.key} value={s.key}>{s.emoji} {s.label}</option>)}
                 </select>
               </div>
+              <button onClick={addProduct}
+                className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-semibold transition-colors">
+                Ajouter au kanban
+              </button>
             </div>
-            <button onClick={handleAddProduct}
-              className="w-full py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-all">
-              Ajouter
-            </button>
           </div>
         </div>
       )}
