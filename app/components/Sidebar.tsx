@@ -17,6 +17,8 @@ const navItems = [
   { href: "/dashboard/research", label: "Product Research", icon: "🔍" },
   { href: "/dashboard/stock", label: "Stock", icon: "🏪" },
   { href: "/dashboard/whatsapp", label: "WhatsApp Automations", icon: "💬" },
+  { href: "/dashboard/billing", label: "Billing Tracker", icon: "💳" },
+  { href: "/dashboard/ai", label: "AI Assistant", icon: "🤖" },
 ];
 
 export default function Sidebar() {
