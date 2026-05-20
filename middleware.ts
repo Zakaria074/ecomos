@@ -1,6 +1,11 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+const AGENT_EMAILS = [
+  "dinokoko30@gmail.com",
+
+];
+
 export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith('/api')) {
     return NextResponse.next()
@@ -35,6 +40,16 @@ export async function middleware(request: NextRequest) {
 
   if (user && request.nextUrl.pathname.startsWith('/login')) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
+  }
+
+  if (user) {
+    const email   = user.email?.toLowerCase() || "";
+    const isAgent = AGENT_EMAILS.includes(email);
+    const path    = request.nextUrl.pathname;
+
+    if (isAgent && path.startsWith("/dashboard") && path !== "/dashboard/team") {
+      return NextResponse.redirect(new URL("/dashboard/team", request.url));
+    }
   }
 
   return supabaseResponse
