@@ -9,7 +9,8 @@ const supabase = createClient(
 const SECRET = process.env.ECO_WEBHOOK_SECRET!;
 
 export async function POST(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get("secret");
+  const secret = req.headers.get("x-webhook-secret") ?? 
+               req.nextUrl.searchParams.get("secret");
   if (secret !== SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
