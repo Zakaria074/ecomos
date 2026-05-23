@@ -1,9 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 const DEFAULT_WORKERS = ["Agent 1", "Agent 2", "Agent 3", "Agent 4"];
-const STORAGE_KEY = "tv30_v4";
 const MAX_ROWS = 30;
 
 interface Row {
@@ -23,10 +28,8 @@ interface AppState {
   rows: Row[];
 }
 
-function today() { return new Date().toISOString().split("T")[0]; }
-
 function makeRow(): Row {
-  return { date: today(), cmd: 0, s1: 0, s2: 0, s3: 0, s4: 0, loaded: false, fc: 0, note: "" };
+  return { date: "", cmd: 0, s1: 0, s2: 0, s3: 0, s4: 0, loaded: false, fc: 0, note: "" };
 }
 
 function initRows(rows: Row[]): Row[] {
@@ -70,32 +73,57 @@ const A = [
 export default function TeamVerificationPage() {
   const [state, setState] = useState<AppState>({ workerNames: [...DEFAULT_WORKERS], rows: [] });
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
   const fileRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  // ── جلب البيانات من Supabase ──
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as AppState;
-        parsed.rows = initRows(parsed.rows);
-        setState(parsed);
-        return;
+    async function load() {
+      const { data, error } = await supabase
+        .from("team_verification")
+        .select("*")
+        .order("id", { ascending: true })
+        .limit(1)
+        .single();
+
+      if (data && !error) {
+        setState({
+          workerNames: data.worker_names ?? [...DEFAULT_WORKERS],
+          rows: initRows(data.rows ?? []),
+        });
+      } else {
+        setState({ workerNames: [...DEFAULT_WORKERS], rows: initRows([]) });
       }
-    } catch {}
-    setState({ workerNames: [...DEFAULT_WORKERS], rows: initRows([]) });
+      setLoading(false);
+    }
+    load();
   }, []);
 
-  function persist() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
+  // ── حفظ في Supabase ──
+  async function persist() {
+    const { error } = await supabase
+      .from("team_verification")
+      .update({
+        worker_names: state.workerNames,
+        rows: state.rows,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+
+    if (!error) {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    }
   }
 
-  function clearAll() {
+  async function clearAll() {
     if (!confirm("Effacer toutes les données ?")) return;
     const fresh: AppState = { workerNames: [...DEFAULT_WORKERS], rows: initRows([]) };
     setState(fresh);
-    localStorage.removeItem(STORAGE_KEY);
+    await supabase
+      .from("team_verification")
+      .update({ worker_names: fresh.workerNames, rows: fresh.rows })
+      .eq("id", 1);
   }
 
   function updateWorker(i: number, val: string) {
@@ -121,7 +149,7 @@ export default function TeamVerificationPage() {
     );
     if (!arr.length) return;
     setState(prev => {
-      const date = prev.rows[ri]?.date || today();
+      const date = prev.rows[ri]?.date || "";
       (async () => {
         let s1 = 0, s2 = 0, s3 = 0, s4 = 0;
         for (const f of arr) {
@@ -233,10 +261,14 @@ export default function TeamVerificationPage() {
   const sVals = [totals.s1, totals.s2, totals.s3, totals.s4];
   const loadedCount = state.rows.filter(r => r.loaded).length;
 
+  if (loading) return (
+    <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"/>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-white px-6 py-6">
-
-      {/* ── Header ── */}
       <div className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Team Verification</h1>
@@ -276,7 +308,6 @@ export default function TeamVerificationPage() {
         </div>
       </div>
 
-      {/* ── Agent Names ── */}
       <div className="grid grid-cols-4 gap-3 mb-5">
         {state.workerNames.map((name, i) => (
           <div key={i} className={`flex items-center gap-2 rounded-xl px-3 py-2.5 border ${A[i].wrap}`}>
@@ -293,7 +324,6 @@ export default function TeamVerificationPage() {
         ))}
       </div>
 
-      {/* ── KPI Strip ── */}
       <div className="grid grid-cols-6 gap-3 mb-5">
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">Cmd Livre</p>
@@ -317,7 +347,6 @@ export default function TeamVerificationPage() {
         </div>
       </div>
 
-      {/* ── Table ── */}
       <div className="border border-gray-100 rounded-2xl overflow-hidden">
         <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
           <thead>
