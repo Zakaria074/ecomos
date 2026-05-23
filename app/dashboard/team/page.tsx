@@ -76,7 +76,7 @@ export default function TeamVerificationPage() {
   const [loading, setLoading] = useState(true);
   const fileRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // ── جلب البيانات من Supabase ──
+  // ── تحميل من Supabase ──
   useEffect(() => {
     async function load() {
       const { data, error } = await supabase
@@ -85,7 +85,6 @@ export default function TeamVerificationPage() {
         .order("id", { ascending: true })
         .limit(1)
         .single();
-
       if (data && !error) {
         setState({
           workerNames: data.worker_names ?? [...DEFAULT_WORKERS],
@@ -99,22 +98,23 @@ export default function TeamVerificationPage() {
     load();
   }, []);
 
-  // ── حفظ في Supabase ──
-  async function persist() {
-    const { error } = await supabase
-      .from("team_verification")
-      .update({
-        worker_names: state.workerNames,
-        rows: state.rows,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
-    if (!error) {
+  // ── حفظ تلقائي ──
+  useEffect(() => {
+    if (loading) return;
+    const timer = setTimeout(async () => {
+      await supabase
+        .from("team_verification")
+        .update({
+          worker_names: state.workerNames,
+          rows: state.rows,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", 1);
       setSaved(true);
-      setTimeout(() => setSaved(false), 1800);
-    }
-  }
+      setTimeout(() => setSaved(false), 1500);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [state, loading]);
 
   async function clearAll() {
     if (!confirm("Effacer toutes les données ?")) return;
@@ -172,7 +172,6 @@ export default function TeamVerificationPage() {
       cmd: a.cmd + r.cmd, s1: a.s1 + r.s1, s2: a.s2 + r.s2,
       s3: a.s3 + r.s3, s4: a.s4 + r.s4, dhd: a.dhd + dhd(r),
     }), { cmd: 0, s1: 0, s2: 0, s3: 0, s4: 0, dhd: 0 });
-
     const activeRows = state.rows.filter(r => r.cmd > 0 || r.loaded);
     const win = window.open("", "_blank", "width=1000,height=700");
     if (!win) return;
@@ -212,13 +211,9 @@ export default function TeamVerificationPage() {
     </div>
     <table>
       <thead><tr>
-        <th style="width:20px">#</th>
-        <th>Date</th>
-        <th class="r">Cmd</th>
+        <th style="width:20px">#</th><th>Date</th><th class="r">Cmd</th>
         ${wn.map(n => `<th class="r">${n}</th>`).join("")}
-        <th class="r">DHD</th>
-        <th class="r">% DHD</th>
-        <th>Note</th>
+        <th class="r">DHD</th><th class="r">% DHD</th><th>Note</th>
       </tr></thead>
       <tbody>
         ${activeRows.map((r, i) => `<tr>
@@ -226,10 +221,8 @@ export default function TeamVerificationPage() {
           <td>${r.date}</td>
           <td class="r" style="font-weight:500">${r.cmd}</td>
           ${[r.s1, r.s2, r.s3, r.s4].map((v, si) => `
-            <td class="r">
-              <span style="color:${A[si].pdf};font-weight:500">${v}</span>
-              <span class="muted">· ${pct(v, r.cmd)}</span>
-            </td>`).join("")}
+            <td class="r"><span style="color:${A[si].pdf};font-weight:500">${v}</span>
+            <span class="muted">· ${pct(v, r.cmd)}</span></td>`).join("")}
           <td class="r" style="color:#0C447C;font-weight:500">${dhd(r)}</td>
           <td class="r" style="color:#6b7280">${pct(dhd(r), r.cmd)}</td>
           <td class="note-cell">${r.note || ""}</td>
@@ -239,16 +232,13 @@ export default function TeamVerificationPage() {
         <td colspan="2">Total — ${activeRows.length} lignes</td>
         <td class="r">${t.cmd}</td>
         ${[t.s1, t.s2, t.s3, t.s4].map((v, i) => `
-          <td class="r">
-            <span style="color:${A[i].pdf};font-weight:600">${v}</span>
-            <span class="muted">· ${pct(v, t.cmd)}</span>
-          </td>`).join("")}
+          <td class="r"><span style="color:${A[i].pdf};font-weight:600">${v}</span>
+          <span class="muted">· ${pct(v, t.cmd)}</span></td>`).join("")}
         <td class="r" style="color:#0C447C;font-weight:600">${t.dhd}</td>
         <td class="r" style="color:#6b7280">${pct(t.dhd, t.cmd)}</td>
         <td></td>
       </tr></tfoot>
-    </table>
-    </body></html>`);
+    </table></body></html>`);
     win.document.close();
     setTimeout(() => { win.focus(); win.print(); }, 400);
   }
@@ -269,6 +259,8 @@ export default function TeamVerificationPage() {
 
   return (
     <div className="min-h-screen bg-white px-6 py-6">
+
+      {/* ── Header ── */}
       <div className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Team Verification</h1>
@@ -277,6 +269,14 @@ export default function TeamVerificationPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {saved && (
+            <span className="flex items-center gap-1 text-xs text-green-600">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+              </svg>
+              Sauvegardé
+            </span>
+          )}
           <button onClick={clearAll}
             className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -293,21 +293,10 @@ export default function TeamVerificationPage() {
             </svg>
             PDF
           </button>
-          <button onClick={persist}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-all ${
-              saved
-                ? "bg-green-50 border border-green-200 text-green-700"
-                : "bg-purple-600 hover:bg-purple-700 text-white"
-            }`}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d={saved ? "M5 13l4 4L19 7" : "M17 16v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-7a2 2 0 012-2h2m3-4H9a2 2 0 00-2 2v7a2 2 0 002 2h10a2 2 0 002-2V7l-4-4z"}/>
-            </svg>
-            {saved ? "Sauvegardé" : "Sauvegarder"}
-          </button>
         </div>
       </div>
 
+      {/* ── Agent Names ── */}
       <div className="grid grid-cols-4 gap-3 mb-5">
         {state.workerNames.map((name, i) => (
           <div key={i} className={`flex items-center gap-2 rounded-xl px-3 py-2.5 border ${A[i].wrap}`}>
@@ -324,6 +313,7 @@ export default function TeamVerificationPage() {
         ))}
       </div>
 
+      {/* ── KPI Strip ── */}
       <div className="grid grid-cols-6 gap-3 mb-5">
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">Cmd Livre</p>
@@ -347,6 +337,7 @@ export default function TeamVerificationPage() {
         </div>
       </div>
 
+      {/* ── Table ── */}
       <div className="border border-gray-100 rounded-2xl overflow-hidden">
         <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
           <thead>
