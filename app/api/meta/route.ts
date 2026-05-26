@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
             `https://graph.facebook.com/v19.0/act_${accountId}/insights?fields=campaign_name,campaign_id,spend,impressions,clicks,actions&time_range={"since":"${dateFrom}","until":"${dateTo}"}&level=campaign&access_token=${token}`
           ),
           fetch(
-            `https://graph.facebook.com/v19.0/act_${accountId}/adsets?fields=campaign_id,daily_budget,status&limit=100&access_token=${token}`
+            `https://graph.facebook.com/v19.0/act_${accountId}/adsets?fields=campaign_id,daily_budget,status,effective_status&limit=100&access_token=${token}`
           ),
         ]);
 
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
         // نجمع budget لكل campaign من adsets النشطة فقط
         const budgetMap: Record<string, number> = {};
         (adsetsData.data || []).forEach((a: { campaign_id: string; daily_budget?: string; status: string }) => {
-          if (a.status === "ACTIVE" && a.daily_budget) {
+          if (a.effective_status === "ACTIVE" && a.daily_budget) {
             budgetMap[a.campaign_id] = (budgetMap[a.campaign_id] || 0) + parseInt(a.daily_budget || "0") / 100;
           }
         });
