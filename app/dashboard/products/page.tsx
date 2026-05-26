@@ -42,6 +42,7 @@ interface ProductData {
   adSpendTiktok: number;
   active: boolean;
   addedBy?: string;
+  adAccounts?: string[]; // ← حسابات إعلانية مرتبطة بالمنتج
 }
 
 function getUserColor(name: string): string {
@@ -58,6 +59,22 @@ function getUserColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
+}
+
+function getAccountColor(name: string): string {
+  const colors = [
+    { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+    { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
+    { bg: "bg-teal-50", text: "text-teal-700", border: "border-teal-200" },
+    { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
+    { bg: "bg-pink-50", text: "text-pink-700", border: "border-pink-200" },
+    { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },
+    { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },
+    { bg: "bg-yellow-50", text: "text-yellow-700", border: "border-yellow-200" },
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return Object.values(colors[Math.abs(hash) % colors.length]).join(" ");
 }
 
 async function fetchEcoProducts(token: string): Promise<EcoProduct[]> {
@@ -93,7 +110,7 @@ function getAdRisk(adTotal: number, costMax: number): { label: string; color: st
 function buildPDF(
   title: string, today: string, badge: string,
   cards: any[], tableHead: string, tableRows: string,
-  footerCount: number, footerLabel: string, extraBlock: string = ""
+  footerCount: number, footerLabel: string
 ): string {
   const cardsHtml = cards.map(c => `
     <div style="background:${c.bgColor};border:1px solid ${c.borderCard};border-radius:12px;padding:4mm;border-left:4px solid ${c.borderColor}">
@@ -121,7 +138,6 @@ function buildPDF(
       <div style="background:#f3f0ff;color:#7c3aed;font-size:10px;font-weight:700;padding:5px 14px;border-radius:20px;border:1px solid #ddd6fe;display:inline-block">${badge}</div>
     </div>
   </div>
-  ${extraBlock}
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4mm;margin-bottom:6mm">${cardsHtml}</div>
   <table style="width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
     <thead><tr style="background:#7c3aed">${tableHead}</tr></thead>
@@ -150,9 +166,11 @@ export default function ProductsAdSpendPage() {
   const [pdfProfitLoading, setPdfProfitLoading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [currentUser, setCurrentUser] = useState("Admin");
+  const [activeAccountFilter, setActiveAccountFilter] = useState<string | null>(null); // ← فلتر الحساب
 
   const [form, setForm] = useState({
     ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "",
+    adAccounts: [] as string[], // ← حسابات مختارة في النافذة
   });
 
   useEffect(() => {
@@ -173,7 +191,7 @@ export default function ProductsAdSpendPage() {
       const savedDollar = await loadSetting("adspend_dollar");
       if (savedProducts) setProducts(savedProducts);
       if (savedAccounts) setAccounts(savedAccounts);
-      else setAccounts(["Dino","Echri","SST","Wiaox","108","Choco","Lucky","Tik 1","Tik 2","snap"].map((name, i) => ({
+      else setAccounts(["Dino","Echri","SST","Wiaox","108","Choco","Lucky","Tik 1","Tik 2"].map((name, i) => ({
         id: i.toString(), name, spend: 0, checked: false,
       })));
       if (savedDollar) setDollarRate(savedDollar);
@@ -211,6 +229,7 @@ export default function ProductsAdSpendPage() {
   const activeCount = products.filter(p => p.active).length;
   const stoppedCount = products.filter(p => !p.active).length;
 
+  // ── PDF Stock ──
   const handleGenerateStockPDF = async () => {
     setPdfStockLoading(true);
     try {
@@ -258,6 +277,7 @@ export default function ProductsAdSpendPage() {
     setPdfStockLoading(false);
   };
 
+  // ── PDF Profit ──
   const handleGenerateProfitPDF = async () => {
     setPdfProfitLoading(true);
     try {
@@ -305,6 +325,7 @@ export default function ProductsAdSpendPage() {
     setPdfProfitLoading(false);
   };
 
+  // ── حفظ منتج ──
   const saveProduct = () => {
     if (editingId) {
       setProducts(prev => prev.map(p =>
@@ -315,6 +336,7 @@ export default function ProductsAdSpendPage() {
           rate: Number(form.rate) || 0,
           adSpendFb: Number(form.adSpendFb) || 0,
           adSpendTiktok: Number(form.adSpendTiktok) || 0,
+          adAccounts: form.adAccounts,
         } : p
       ));
     } else {
@@ -333,12 +355,23 @@ export default function ProductsAdSpendPage() {
         adSpendTiktok: Number(form.adSpendTiktok) || 0,
         active: true,
         addedBy: currentUser,
+        adAccounts: form.adAccounts,
       };
       setProducts(prev => [...prev, np]);
     }
     setShowAddPanel(false);
     setEditingId(null);
     setProductSearch("");
+    setForm({ ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "", adAccounts: [] });
+  };
+
+  const toggleFormAccount = (name: string) => {
+    setForm(prev => ({
+      ...prev,
+      adAccounts: prev.adAccounts.includes(name)
+        ? prev.adAccounts.filter(a => a !== name)
+        : [...prev.adAccounts, name],
+    }));
   };
 
   const deleteProduct = (id: string) => setProducts(prev => prev.filter(p => p.id !== id));
@@ -352,13 +385,15 @@ export default function ProductsAdSpendPage() {
   };
   const deleteAccount = (id: string) => setAccounts(prev => prev.filter(a => a.id !== id));
 
-  const filteredProducts = products.filter(p =>
-    p.title.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase())
-  );
+  // ── فلتر المنتجات ──
+  const filteredProducts = products
+    .filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))
+    .filter(p => activeAccountFilter ? p.adAccounts?.includes(activeAccountFilter) : true);
 
   return (
     <div className="space-y-5">
+
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Products & Ad Spend</h2>
@@ -382,6 +417,7 @@ export default function ProductsAdSpendPage() {
         </div>
       </div>
 
+      {/* KPIs + Accounts */}
       <div className="grid grid-cols-3 gap-4 items-start">
         <div className="col-span-2 grid grid-cols-3 gap-3 items-start">
           <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm overflow-hidden relative">
@@ -449,12 +485,50 @@ export default function ProductsAdSpendPage() {
         </div>
       </div>
 
+{/* ── فلتر الحسابات الإعلانية ── */}
+<div className="flex items-center gap-2 flex-wrap">
+  <button
+    onClick={() => setActiveAccountFilter(null)}
+    className={`px-4 py-2 rounded-2xl text-sm font-semibold border-2 transition-all ${
+      !activeAccountFilter
+        ? "bg-purple-600 text-white border-purple-600"
+        : "bg-white text-gray-500 border-gray-200 hover:border-purple-300 hover:text-purple-600"
+    }`}>
+    Tout
+  </button>
+  {accounts.map(a => (
+    <button key={a.id}
+      onClick={() => setActiveAccountFilter(activeAccountFilter === a.name ? null : a.name)}
+      className={`px-4 py-2 rounded-2xl text-sm font-semibold border-2 transition-all ${
+        activeAccountFilter === a.name
+          ? "bg-blue-500 text-white border-blue-500"
+          : "bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50"
+      }`}>
+      {a.name}
+      {a.spend > 0 && (
+        <span className={`ml-2 font-bold text-xs ${
+          activeAccountFilter === a.name ? "text-blue-100" : "text-blue-500"
+        }`}>
+          ${a.spend.toFixed(2)}
+        </span>
+      )}
+    </button>
+  ))}
+  {activeAccountFilter && (
+    <span className="text-xs text-gray-400 ml-1">
+      {filteredProducts.length} منتج
+    </span>
+  )}
+</div>
+
+      {/* ── نافذة الإضافة ── */}
       {showAddPanel && (
         <div className="bg-white rounded-2xl border border-purple-100 p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-gray-900">{editingId ? "Modifier le produit" : "Ajouter un produit"}</div>
-            <button onClick={() => { setShowAddPanel(false); setProductSearch(""); }} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+            <button onClick={() => { setShowAddPanel(false); setProductSearch(""); setForm({ ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "", adAccounts: [] }); }} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
           </div>
+
           {!editingId && (
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -494,6 +568,7 @@ export default function ProductsAdSpendPage() {
               </div>
             </div>
           )}
+
           <div className="grid grid-cols-5 gap-3">
             {[
               { label: "Prix vente (DZD)", key: "sellingPrice" },
@@ -510,6 +585,25 @@ export default function ProductsAdSpendPage() {
               </div>
             ))}
           </div>
+
+          {/* ── اختيار الحسابات الإعلانية ── */}
+          <div>
+            <label className="text-xs text-gray-400 mb-2 block">Comptes publicitaires</label>
+            <div className="flex flex-wrap gap-2">
+              {accounts.map(a => (
+                <button key={a.id} type="button"
+                  onClick={() => toggleFormAccount(a.name)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                    form.adAccounts.includes(a.name)
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600"
+                  }`}>
+                  {a.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {form.sellingPrice && form.costPrice && form.rate && (
             <div className="bg-orange-50 rounded-xl px-4 py-2.5 flex items-center gap-4 text-sm">
               <span className="text-gray-500">فارق:</span>
@@ -521,6 +615,7 @@ export default function ProductsAdSpendPage() {
               </span>
             </div>
           )}
+
           <div className="flex justify-end">
             <button onClick={saveProduct} disabled={!editingId && !form.ecoProductId}
               className="px-4 py-2 rounded-xl text-sm font-medium bg-purple-600 text-white disabled:opacity-40 hover:bg-purple-700 transition-all">
@@ -530,13 +625,19 @@ export default function ProductsAdSpendPage() {
         </div>
       )}
 
+      {/* ── جدول المنتجات ── */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-sm font-semibold text-gray-900">Produits — tous les magasins</div>
+          <div className="text-sm font-semibold text-gray-900">
+            Produits — tous les magasins
+            {activeAccountFilter && (
+              <span className="ml-2 text-xs text-blue-500 font-normal">· {activeAccountFilter}</span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <input type="text" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)}
               className="border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-purple-400 w-56" />
-            <button onClick={() => { setShowAddPanel(true); setEditingId(null); setForm({ ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "" }); }}
+            <button onClick={() => { setShowAddPanel(true); setEditingId(null); setForm({ ecoProductId: "", costPrice: "", sellingPrice: "", rate: "", adSpendFb: "", adSpendTiktok: "", adAccounts: [] }); }}
               className="px-4 py-2 rounded-xl text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-all shadow-sm shadow-purple-200">
               + Ajouter
             </button>
@@ -548,6 +649,7 @@ export default function ProductsAdSpendPage() {
               <th className="text-left pb-3 font-medium w-8"></th>
               <th className="text-left pb-3 font-medium">منتج</th>
               <th className="text-left pb-3 font-medium">متجر</th>
+              <th className="text-left pb-3 font-medium">حسابات</th>
               <th className="text-right pb-3 font-medium">سعر البيع</th>
               <th className="text-right pb-3 font-medium">سعر الشراء</th>
               <th className="text-right pb-3 font-medium">%</th>
@@ -563,9 +665,9 @@ export default function ProductsAdSpendPage() {
           <tbody>
             {filteredProducts.length === 0 ? (
               <tr>
-                <td colSpan={13} className="text-center py-12 text-gray-300">
+                <td colSpan={14} className="text-center py-12 text-gray-300">
                   <div className="text-3xl mb-2">📦</div>
-                  <div className="text-xs">Aucun produit — cliquez sur "+ Ajouter"</div>
+                  <div className="text-xs">Aucun produit</div>
                 </td>
               </tr>
             ) : (
@@ -587,6 +689,18 @@ export default function ProductsAdSpendPage() {
                     <td className="py-2.5">
                       <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-lg font-medium">{shopName}</span>
                     </td>
+                    {/* ── عمود الحسابات ── */}
+                    <td className="py-2.5">
+                      <div className="flex flex-wrap gap-1">
+                        {(p.adAccounts || []).map(acc => (
+                          <span key={acc}
+                            onClick={() => setActiveAccountFilter(activeAccountFilter === acc ? null : acc)}
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 cursor-pointer hover:bg-blue-100 transition-colors">
+                            {acc}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
                     <td className="py-2.5 text-right text-gray-700 font-medium">{p.sellingPrice.toLocaleString()}</td>
                     <td className="py-2.5 text-right text-gray-500 font-medium">{p.costPrice.toLocaleString()}</td>
                     <td className="py-2.5 text-right text-gray-400 text-xs">{p.rate || 0}%</td>
@@ -607,7 +721,15 @@ export default function ProductsAdSpendPage() {
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => {
                           setEditingId(p.id);
-                          setForm({ ecoProductId: p.id, sellingPrice: p.sellingPrice.toString(), costPrice: p.costPrice.toString(), rate: p.rate?.toString() || "", adSpendFb: p.adSpendFb.toString(), adSpendTiktok: p.adSpendTiktok.toString() });
+                          setForm({
+                            ecoProductId: p.id,
+                            sellingPrice: p.sellingPrice.toString(),
+                            costPrice: p.costPrice.toString(),
+                            rate: p.rate?.toString() || "",
+                            adSpendFb: p.adSpendFb.toString(),
+                            adSpendTiktok: p.adSpendTiktok.toString(),
+                            adAccounts: p.adAccounts || [],
+                          });
                           setShowAddPanel(true);
                         }} className="text-gray-300 hover:text-purple-500 transition-colors text-xs">✏️</button>
                         <button onClick={() => deleteProduct(p.id)} className="text-gray-300 hover:text-red-500 transition-colors text-xs">✕</button>

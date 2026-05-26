@@ -9,11 +9,13 @@ interface Campaign {
   impressions: string;
   clicks: string;
   actions: { action_type: string; value: string }[];
+  budget?: { daily: number; lifetime: number; status: string };
 }
 
 interface AccountData {
   accountId: string;
   accountName: string;
+  totalDailyBudget?: number;
   summary: {
     spend: string;
     impressions: string;
@@ -56,9 +58,10 @@ interface CampaignRow {
   results: number;
   cpr: number;
   cvr: number;
+  budget: number;
 }
 
-type SortKey = "spend" | "results" | "cpr" | "cvr" | "impressions" | "clicks";
+type SortKey = "spend" | "results" | "cpr" | "cvr" | "impressions" | "clicks" | "budget";
 type SortDir = "asc" | "desc";
 type TabView = "all" | "meta" | "tiktok";
 
@@ -141,7 +144,8 @@ export default function PerformancePage() {
         const results = getMetaResults(c.actions);
         const cpr = results > 0 ? spend / results : 0;
         const cvr = clicks > 0 ? (results / clicks) * 100 : 0;
-        parsed.push({ source: "meta", accountId: acc.accountId, accountName: acc.accountName, campaignName: c.campaign_name, spend, impressions, clicks, results, cpr, cvr });
+        const budget = c.budget?.daily || 0;
+        parsed.push({ source: "meta", accountId: acc.accountId, accountName: acc.accountName, campaignName: c.campaign_name, spend, impressions, clicks, results, cpr, cvr, budget });
       });
     });
 
@@ -152,7 +156,7 @@ export default function PerformancePage() {
       const results = parseInt(c.conversions || "0");
       const cpr = results > 0 ? spend / results : 0;
       const cvr = clicks > 0 ? (results / clicks) * 100 : 0;
-      parsed.push({ source: "tiktok", accountId: "tiktok", accountName: "TikTok Ads", campaignName: c.campaign_name, spend, impressions, clicks, results, cpr, cvr });
+      parsed.push({ source: "tiktok", accountId: "tiktok", accountName: "TikTok Ads", campaignName: c.campaign_name, spend, impressions, clicks, results, cpr, cvr, budget: 0 });
     });
 
     setRows(parsed);
@@ -199,14 +203,14 @@ export default function PerformancePage() {
 
   const ttSpend = parseFloat(tiktok.summary?.spend || "0");
   const ttResults = parseInt(tiktok.summary?.conversions || "0");
-  const ttClicks = parseInt(tiktok.summary?.clicks || "0");
   const ttCPR = ttResults > 0 ? ttSpend / ttResults : 0;
 
   const totalSpend = fbSpend + ttSpend;
   const totalResults = fbResults + ttResults;
-  const totalClicks = fbClicks + ttClicks;
+  const totalClicks = fbClicks + parseInt(tiktok.summary?.clicks || "0");
   const totalCPR = totalResults > 0 ? totalSpend / totalResults : 0;
-  const totalCVR = totalClicks > 0 ? (totalResults / totalClicks) * 100 : 0;
+
+  const totalBudget = rows.filter(r => r.source === "meta").reduce((s, r) => s + r.budget, 0);
 
   const loading = loadingMeta || loadingTT;
 
@@ -218,6 +222,7 @@ export default function PerformancePage() {
 
   return (
     <div className="space-y-5">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -259,7 +264,6 @@ export default function PerformancePage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-3">
-        {/* Facebook */}
         <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
@@ -269,22 +273,12 @@ export default function PerformancePage() {
             {loadingMeta && <div className="w-3 h-3 border border-blue-300 border-t-transparent rounded-full animate-spin ml-auto" />}
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div>
-              <div className="text-xs text-gray-400 mb-1">Spend</div>
-              <div className="text-lg font-bold text-blue-600">${fbSpend.toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-400 mb-1">Results</div>
-              <div className="text-lg font-bold text-green-600">{fbResults}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-400 mb-1">CPR</div>
-              <div className="text-lg font-bold text-purple-600">${fbCPR.toFixed(2)}</div>
-            </div>
+            <div><div className="text-xs text-gray-400 mb-1">Spend</div><div className="text-lg font-bold text-blue-600">${fbSpend.toFixed(2)}</div></div>
+            <div><div className="text-xs text-gray-400 mb-1">Results</div><div className="text-lg font-bold text-green-600">{fbResults}</div></div>
+            <div><div className="text-xs text-gray-400 mb-1">CPR</div><div className="text-lg font-bold text-purple-600">${fbCPR.toFixed(2)}</div></div>
           </div>
         </div>
 
-        {/* TikTok */}
         <div className="bg-white border border-pink-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-6 h-6 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600">
@@ -295,40 +289,21 @@ export default function PerformancePage() {
             {tiktok.error && <span className="text-xs text-red-400 ml-auto">Error</span>}
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div>
-              <div className="text-xs text-gray-400 mb-1">Spend</div>
-              <div className="text-lg font-bold text-pink-600">${ttSpend.toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-400 mb-1">Results</div>
-              <div className="text-lg font-bold text-green-600">{ttResults}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-400 mb-1">CPR</div>
-              <div className="text-lg font-bold text-purple-600">${ttCPR.toFixed(2)}</div>
-            </div>
+            <div><div className="text-xs text-gray-400 mb-1">Spend</div><div className="text-lg font-bold text-pink-600">${ttSpend.toFixed(2)}</div></div>
+            <div><div className="text-xs text-gray-400 mb-1">Results</div><div className="text-lg font-bold text-green-600">{ttResults}</div></div>
+            <div><div className="text-xs text-gray-400 mb-1">CPR</div><div className="text-lg font-bold text-purple-600">${ttCPR.toFixed(2)}</div></div>
           </div>
         </div>
 
-        {/* Total */}
         <div className="bg-gray-900 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Total Combined</span>
             {loading && <div className="w-3 h-3 border border-gray-600 border-t-transparent rounded-full animate-spin ml-auto" />}
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div>
-              <div className="text-xs text-gray-500 mb-1">Spend</div>
-              <div className="text-lg font-bold text-white">${totalSpend.toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-1">Results</div>
-              <div className="text-lg font-bold text-green-400">{totalResults}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-1">CPR</div>
-              <div className="text-lg font-bold text-purple-400">${totalCPR.toFixed(2)}</div>
-            </div>
+            <div><div className="text-xs text-gray-500 mb-1">Spend</div><div className="text-lg font-bold text-white">${totalSpend.toFixed(2)}</div></div>
+            <div><div className="text-xs text-gray-500 mb-1">Results</div><div className="text-lg font-bold text-green-400">{totalResults}</div></div>
+            <div><div className="text-xs text-gray-500 mb-1">CPR</div><div className="text-lg font-bold text-purple-400">${totalCPR.toFixed(2)}</div></div>
           </div>
         </div>
       </div>
@@ -339,9 +314,7 @@ export default function PerformancePage() {
           <div key={acc.accountId}
             onClick={() => setActiveAccount(activeAccount === acc.accountId ? null : acc.accountId)}
             className={`cursor-pointer border rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-3 transition-all ${
-              activeAccount === acc.accountId
-                ? "border-blue-400 bg-blue-50"
-                : "bg-white border-gray-100 hover:border-blue-200"
+              activeAccount === acc.accountId ? "border-blue-400 bg-blue-50" : "bg-white border-gray-100 hover:border-blue-200"
             }`}>
             <div className="w-5 h-5 text-blue-500"><MetaIcon size={14} /></div>
             <span className="text-xs font-medium text-gray-700">{acc.accountName}</span>
@@ -352,9 +325,7 @@ export default function PerformancePage() {
           <div
             onClick={() => setActiveAccount(activeAccount === "tiktok" ? null : "tiktok")}
             className={`cursor-pointer border rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-3 transition-all ${
-              activeAccount === "tiktok"
-                ? "border-pink-400 bg-pink-50"
-                : "bg-white border-pink-100 hover:border-pink-300"
+              activeAccount === "tiktok" ? "border-pink-400 bg-pink-50" : "bg-white border-pink-100 hover:border-pink-300"
             }`}>
             <div className="w-5 h-5 text-pink-500"><TikTokIcon size={14} /></div>
             <span className="text-xs font-medium text-gray-700">TikTok Ads</span>
@@ -366,6 +337,24 @@ export default function PerformancePage() {
           <span className="text-sm font-bold text-white">${totalSpend.toFixed(2)}</span>
         </div>
       </div>
+
+      {/* Daily Budget Strip */}
+      {!loadingMeta && totalBudget > 0 && (
+        <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-4 py-2.5 shadow-sm flex-wrap">
+          <span className="text-xs text-gray-400 font-medium">Daily Budget actif</span>
+          <span className="text-sm font-bold text-purple-600">${totalBudget.toFixed(2)}</span>
+          <span className="text-xs text-gray-200">|</span>
+          {accounts.map(acc => {
+            const accBudget = rows.filter(r => r.accountId === acc.accountId).reduce((s, r) => s + r.budget, 0);
+            if (accBudget === 0) return null;
+            return (
+              <span key={acc.accountId} className="text-xs text-gray-500">
+                {acc.accountName} <span className="font-semibold text-gray-700">${accBudget.toFixed(2)}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {/* Active Account Filter Badge */}
       {activeAccount && (
@@ -409,6 +398,7 @@ export default function PerformancePage() {
             <tr className="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
               <th className="text-left px-5 py-3 font-medium">Campagne</th>
               <th className="text-left px-4 py-3 font-medium">Source</th>
+              <th className="text-right px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort("budget")}>Budget <SortArrow k="budget" /></th>
               <th className="text-right px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort("spend")}>Spend <SortArrow k="spend" /></th>
               <th className="text-right px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort("results")}>Results <SortArrow k="results" /></th>
               <th className="text-right px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort("cpr")}>CPR <SortArrow k="cpr" /></th>
@@ -418,7 +408,7 @@ export default function PerformancePage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="text-center py-12 text-gray-400">
+                <td colSpan={7} className="text-center py-12 text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-6 h-6 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
                     <span className="text-xs">Chargement des campagnes...</span>
@@ -426,21 +416,26 @@ export default function PerformancePage() {
                 </td>
               </tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-gray-300 text-xs">Aucune campagne</td></tr>
+              <tr><td colSpan={7} className="text-center py-12 text-gray-300 text-xs">Aucune campagne</td></tr>
             ) : (
               sorted.map((r, i) => (
                 <tr key={i} className="border-t border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="px-5 py-3 font-medium text-gray-800 max-w-[240px] truncate">{r.campaignName}</td>
                   <td className="px-4 py-3">
-{r.source === "meta" ? (
-  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-medium">
-    <MetaIcon size={11} /> {r.accountName}
-  </span>
+                    {r.source === "meta" ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-medium">
+                        <MetaIcon size={11} /> {r.accountName}
+                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-pink-50 text-pink-600 text-xs font-medium">
                         <TikTokIcon size={11} /> TikTok
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={r.budget > 0 ? "font-medium text-gray-700" : "text-gray-300"}>
+                      {r.budget > 0 ? `$${r.budget.toFixed(2)}` : "—"}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-blue-600">${r.spend.toFixed(2)}</td>
                   <td className="px-4 py-3 text-right">
@@ -464,6 +459,9 @@ export default function PerformancePage() {
             <tfoot>
               <tr className="border-t-2 border-gray-100 bg-gray-50">
                 <td className="px-5 py-3 font-semibold text-gray-900" colSpan={2}>Total</td>
+                <td className="px-4 py-3 text-right font-bold text-gray-700">
+                  ${filteredRows.filter(r => r.source === "meta").reduce((s, r) => s + r.budget, 0).toFixed(2)}
+                </td>
                 <td className="px-4 py-3 text-right font-bold text-blue-600">
                   ${filteredRows.reduce((s, r) => s + r.spend, 0).toFixed(2)}
                 </td>
