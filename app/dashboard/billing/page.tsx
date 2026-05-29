@@ -225,14 +225,14 @@ function OwnerBalanceSection({ ownerBalances, setOwnerBalances }: {
   setOwnerBalances: React.Dispatch<React.SetStateAction<OwnerBalance[]>>;
 }) {
   const [saving, setSaving] = useState<"Z"|"M"|null>(null);
-  const [form, setForm] = useState<Record<"Z"|"M", {amount:string;date:string;time:string}>>({
-    Z: { amount: "", date: formatDateInput(new Date()), time: "" },
-    M: { amount: "", date: formatDateInput(new Date()), time: "" },
-  });
+const [form, setForm] = useState<Record<"Z"|"M", {amount:string;date:string;time:string;lastAmount:string}>>({
+  Z: { amount: "", date: formatDateInput(new Date()), time: "", lastAmount: "" },
+  M: { amount: "", date: formatDateInput(new Date()), time: "", lastAmount: "" },
+});
 
   useEffect(() => {
     ownerBalances.forEach(ob => {
-      setForm(prev => ({ ...prev, [ob.owner]: { amount: ob.amount.toString(), date: ob.date, time: ob.time } }));
+      setForm(prev => ({ ...prev, [ob.owner]: { amount: ob.amount.toString(), date: ob.date, time: ob.time, lastAmount: (ob as any).last_amount?.toString() || "" } }));
     });
   }, [ownerBalances]);
 
@@ -241,7 +241,7 @@ function OwnerBalanceSection({ ownerBalances, setOwnerBalances }: {
     if (!f.amount) return;
     setSaving(owner);
     const existing = ownerBalances.find(ob => ob.owner === owner);
-    const record = { id: existing?.id || `${owner}-${Date.now()}`, owner, amount: parseFloat(f.amount), date: f.date, time: f.time };
+    const record = { id: existing?.id || `${owner}-${Date.now()}`, owner, amount: parseFloat(f.amount), date: f.date, time: f.time, last_amount: parseFloat(f.lastAmount||"0") };
     const { error } = await supabase.from("billing_balance_tracker").upsert(record);
     if (!error) setOwnerBalances(prev => { const filtered = prev.filter(ob => ob.owner !== owner); return [...filtered, record]; });
     setSaving(null);
@@ -259,25 +259,36 @@ function OwnerBalanceSection({ ownerBalances, setOwnerBalances }: {
               <span className="text-xs text-gray-500 font-medium">آخر مبلغ محسوب</span>
               {saved && <span className="ml-auto text-[10px] text-gray-400">{saved.date}{saved.time?` ${saved.time}`:""}</span>}
             </div>
-            <div className="flex gap-2 flex-wrap">
-              <input type="number" placeholder="المبلغ" value={f.amount}
-                onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],amount:e.target.value}}))}
-                className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-24 focus:outline-none focus:border-purple-400"/>
-              <input type="date" value={f.date}
-                onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],date:e.target.value}}))}
-                className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-400"/>
-              <input type="time" value={f.time} step="1"
-                onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],time:e.target.value}}))}
-                className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-28 focus:outline-none focus:border-purple-400"/>
+<div className="flex gap-2 flex-wrap">
+  <input type="number" placeholder="المبلغ الحالي" value={f.amount}
+    onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],amount:e.target.value}}))}
+    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-28 focus:outline-none focus:border-purple-400"/>
+  <input type="number" placeholder="آخر مبلغ كان في الحساب" value={f.lastAmount||""}
+    onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],lastAmount:e.target.value}}))}
+    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-40 focus:outline-none focus:border-purple-400"/>
+  <input type="date" value={f.date}
+    onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],date:e.target.value}}))}
+    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-400"/>
+  <input type="time" value={f.time} step="1"
+    onChange={e=>setForm(p=>({...p,[owner]:{...p[owner],time:e.target.value}}))}
+    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-28 focus:outline-none focus:border-purple-400"/>
               <button onClick={()=>save(owner)} disabled={saving===owner||!f.amount}
                 className={`px-3 py-1.5 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-40 flex items-center gap-1.5 ${owner==="Z"?"bg-purple-600 hover:bg-purple-700":"bg-blue-600 hover:bg-blue-700"}`}>
                 {saving===owner?<><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>حفظ...</>:"💾 حفظ"}
               </button>
             </div>
             {saved && (
-              <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
-                <span className="text-[10px] text-gray-400">محفوظ</span>
-                <span className={`text-sm font-bold ${owner==="Z"?"text-purple-600":"text-blue-600"}`}>{saved.amount.toFixed(2)}</span>
+              <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-gray-400">المبلغ الحالي</span>
+                  <span className={`text-sm font-bold ${owner==="Z"?"text-purple-600":"text-blue-600"}`}>{saved.amount.toFixed(2)}</span>
+                </div>
+                {(saved as any).last_amount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-400">آخر مبلغ كان</span>
+                    <span className="text-xs font-medium text-gray-500">{(saved as any).last_amount.toFixed(2)}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
