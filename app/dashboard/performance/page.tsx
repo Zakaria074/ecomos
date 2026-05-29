@@ -61,6 +61,13 @@ interface CampaignRow {
   budget: number;
 }
 
+interface AdAccountBalance {
+  accountId: string;
+  accountName: string;
+  balance: number;
+  currency: string;
+}
+
 type SortKey = "spend" | "results" | "cpr" | "cvr" | "impressions" | "clicks" | "budget";
 type SortDir = "asc" | "desc";
 type TabView = "all" | "meta" | "tiktok";
@@ -108,13 +115,28 @@ export default function PerformancePage() {
   const [activePreset, setActivePreset] = useState("Today");
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingTT, setLoadingTT] = useState(true);
+  const [loadingBalances, setLoadingBalances] = useState(true);
   const [accounts, setAccounts] = useState<AccountData[]>([]);
   const [tiktok, setTiktok] = useState<TikTokData>({ summary: null, campaigns: [] });
   const [rows, setRows] = useState<CampaignRow[]>([]);
+  const [balances, setBalances] = useState<AdAccountBalance[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("spend");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [activeTab, setActiveTab] = useState<TabView>("all");
   const [activeAccount, setActiveAccount] = useState<string | null>(null);
+
+  const fetchBalances = async () => {
+    setLoadingBalances(true);
+    try {
+      const res = await fetch("/api/meta/balances");
+      const data = await res.json();
+      setBalances(data);
+    } catch (e) {
+      console.error("Balances error:", e);
+    } finally {
+      setLoadingBalances(false);
+    }
+  };
 
   const fetchAll = async (from: string, to: string) => {
     setLoadingMeta(true);
@@ -162,7 +184,10 @@ export default function PerformancePage() {
     setRows(parsed);
   };
 
-  useEffect(() => { fetchAll(dateFrom, dateTo); }, []);
+  useEffect(() => {
+    fetchAll(dateFrom, dateTo);
+    fetchBalances();
+  }, []);
 
   const applyPreset = (p: typeof PRESETS[0]) => {
     setDateFrom(p.from); setDateTo(p.to);
@@ -211,6 +236,7 @@ export default function PerformancePage() {
   const totalCPR = totalResults > 0 ? totalSpend / totalResults : 0;
 
   const totalBudget = rows.filter(r => r.source === "meta").reduce((s, r) => s + r.budget, 0);
+  const totalBalance = balances.reduce((s, b) => s + b.balance, 0);
 
   const loading = loadingMeta || loadingTT;
 
@@ -266,9 +292,7 @@ export default function PerformancePage() {
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-              <MetaIcon size={14} />
-            </div>
+            <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600"><MetaIcon size={14} /></div>
             <span className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Facebook</span>
             {loadingMeta && <div className="w-3 h-3 border border-blue-300 border-t-transparent rounded-full animate-spin ml-auto" />}
           </div>
@@ -281,9 +305,7 @@ export default function PerformancePage() {
 
         <div className="bg-white border border-pink-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-6 h-6 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600">
-              <TikTokIcon size={14} />
-            </div>
+            <div className="w-6 h-6 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600"><TikTokIcon size={14} /></div>
             <span className="text-xs font-semibold text-pink-600 uppercase tracking-wide">TikTok</span>
             {loadingTT && <div className="w-3 h-3 border border-pink-300 border-t-transparent rounded-full animate-spin ml-auto" />}
             {tiktok.error && <span className="text-xs text-red-400 ml-auto">Error</span>}
@@ -338,23 +360,43 @@ export default function PerformancePage() {
         </div>
       </div>
 
-      {/* Daily Budget Strip */}
-      {!loadingMeta && totalBudget > 0 && (
-        <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-4 py-2.5 shadow-sm flex-wrap">
-          <span className="text-xs text-gray-400 font-medium">Daily Budget actif</span>
-          <span className="text-sm font-bold text-purple-600">${totalBudget.toFixed(2)}</span>
-          <span className="text-xs text-gray-200">|</span>
-          {accounts.map(acc => {
-            const accBudget = rows.filter(r => r.accountId === acc.accountId).reduce((s, r) => s + r.budget, 0);
-            if (accBudget === 0) return null;
-            return (
-              <span key={acc.accountId} className="text-xs text-gray-500">
-                {acc.accountName} <span className="font-semibold text-gray-700">${accBudget.toFixed(2)}</span>
-              </span>
-            );
-          })}
+      {/* Daily Budget + Current Balance Strip */}
+      <div className="flex gap-3 flex-wrap">
+        {!loadingMeta && totalBudget > 0 && (
+          <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-4 py-2.5 shadow-sm flex-wrap flex-1">
+            <span className="text-xs text-gray-400 font-medium">Daily Budget actif</span>
+            <span className="text-sm font-bold text-purple-600">${totalBudget.toFixed(2)}</span>
+            <span className="text-xs text-gray-200">|</span>
+            {accounts.map(acc => {
+              const accBudget = rows.filter(r => r.accountId === acc.accountId).reduce((s, r) => s + r.budget, 0);
+              if (accBudget === 0) return null;
+              return (
+                <span key={acc.accountId} className="text-xs text-gray-500">
+                  {acc.accountName} <span className="font-semibold text-gray-700">${accBudget.toFixed(2)}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Current Balance */}
+        <div className="flex items-center gap-3 bg-white border border-emerald-100 rounded-xl px-4 py-2.5 shadow-sm flex-wrap flex-1">
+          <span className="text-xs text-gray-400 font-medium">Current Balance</span>
+          {loadingBalances ? (
+            <div className="w-3 h-3 border border-emerald-300 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <>
+              <span className="text-sm font-bold text-emerald-600">${(totalBalance / 100).toFixed(2)}</span>
+              <span className="text-xs text-gray-200">|</span>
+              {balances.map(b => (
+                <span key={b.accountId} className="text-xs text-gray-500">
+                  {b.accountName} <span className="font-semibold text-emerald-600">${(b.balance / 100).toFixed(2)}</span>
+                </span>
+              ))}
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Active Account Filter Badge */}
       {activeAccount && (
