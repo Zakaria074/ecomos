@@ -31,9 +31,8 @@ interface BalanceSnapshot {
   id: string;
   label: string;
   initialBalance: number;
-  startTxnId: string;
+  startTxnId?: string;
 }
-
 interface OwnerBalance {
   id: string;
   owner: "Z" | "M";
@@ -304,17 +303,29 @@ function BalanceTracker({ snapshots, setSnapshots, transactions }: {
   setSnapshots: React.Dispatch<React.SetStateAction<BalanceSnapshot[]>>;
   transactions: Transaction[];
 }) {
-  const [label,      setLabel]      = useState("");
-  const [bal,        setBal]        = useState("");
-  const [startTxnId, setStartTxnId] = useState("");
+  const [label, setLabel] = useState("");
+  const [bal,   setBal]   = useState("");
+
+function calcExpectedSimple(initialBalance: number): number {
+  let b = initialBalance;
+  transactions.forEach(t => {
+    if (t.status === "Declined") return;
+    if (t.isDeposit) { b += t.amount; return; }
+    b -= t.amount;
+  });
+  return b;
+}
 
   function add() {
-    if (!bal || !startTxnId) return;
-    setSnapshots(prev => [...prev, { id: Date.now().toString(), label: label || `Snapshot ${prev.length + 1}`, initialBalance: parseFloat(bal), startTxnId }]);
-    setBal(""); setLabel(""); setStartTxnId("");
+    if (!bal) return;
+    setSnapshots(prev => [...prev, {
+      id: Date.now().toString(),
+      label: label || `Snapshot ${prev.length + 1}`,
+      initialBalance: parseFloat(bal),
+      startTxnId: "",
+    }]);
+    setBal(""); setLabel("");
   }
-
-  const selectableTxns = transactions.filter(t => !t.isDeposit && t.status !== "Declined");
 
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm mb-5">
@@ -329,14 +340,7 @@ function BalanceTracker({ snapshots, setSnapshots, transactions }: {
           className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-32 focus:outline-none focus:border-purple-400"/>
         <input placeholder="الرصيد الأولي" type="number" value={bal} onChange={e=>setBal(e.target.value)}
           className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs w-28 focus:outline-none focus:border-purple-400"/>
-        <select value={startTxnId} onChange={e=>setStartTxnId(e.target.value)}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-400 max-w-[200px]">
-          <option value="">اختر آخر عملية معروفة</option>
-          {selectableTxns.map(t => (
-            <option key={t.id} value={t.id}>{t.date}{t.time ? ` ${t.time}` : ""} — {t.payCode ? `*${t.payCode}` : t.platform} — {t.amount.toFixed(2)}</option>
-          ))}
-        </select>
-        <button onClick={add} disabled={!bal || !startTxnId}
+        <button onClick={add} disabled={!bal}
           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors">
           + إضافة
         </button>
@@ -346,9 +350,8 @@ function BalanceTracker({ snapshots, setSnapshots, transactions }: {
       ) : (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
           {snapshots.map(snap => {
-            const expected = calcExpected(snap, transactions);
+            const expected = calcExpectedSimple(snap.initialBalance);
             const diff = expected - snap.initialBalance;
-            const startTxn = transactions.find(t => t.id === snap.startTxnId);
             return (
               <div key={snap.id} className="border border-gray-100 rounded-xl p-3 relative group">
                 <button onClick={() => setSnapshots(prev => prev.filter(s => s.id !== snap.id))}
@@ -356,7 +359,6 @@ function BalanceTracker({ snapshots, setSnapshots, transactions }: {
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
                 <p className="text-xs font-medium text-gray-700 mb-1 pr-5 truncate">{snap.label}</p>
-                {startTxn && <p className="text-[10px] text-gray-400 mb-2 font-mono truncate">من: *{startTxn.payCode || startTxn.platform} — {startTxn.date}</p>}
                 <div className="space-y-1">
                   <div className="flex justify-between">
                     <span className="text-[10px] text-gray-400">الرصيد الأولي</span>
@@ -574,7 +576,7 @@ export default function BillingTrackerPage() {
   const [showReport,     setShowReport]     = useState(false);
   const [dateFrom,       setDateFrom]       = useState("");
   const [dateTo,         setDateTo]         = useState("");
-  const [statusFilter,   setStatusFilter]   = useState<"all"|"OK"|"Not Yet"|"Declined">("all");
+  const [statusFilter,   setStatusFilter]   = useState<"all"|"OK"|"Not Yet"|"Declined"|"Deposit"|"Cleared"|"Unknown">("all");
   const [scanning,       setScanning]       = useState(false);
   const [scanMsg,        setScanMsg]        = useState("");
   const [previewUrls,    setPreviewUrls]    = useState<string[]>([]);
@@ -675,7 +677,7 @@ export default function BillingTrackerPage() {
 
   const spendTxns     = transactions.filter(t=>!t.isDeposit&&t.status!=="Declined");
   const declinedTxns  = transactions.filter(t=>t.status==="Declined");
-  const totalSpend    = spendTxns.filter(t=>t.confirmed==="OK"&&!t.duplicate).reduce((s,t)=>s+t.amount,0);
+const totalSpend = spendTxns.filter(t=>t.confirmed==="OK").reduce((s,t)=>s+t.amount,0);
   const totalDeposit  = transactions.filter(t=>t.isDeposit).reduce((s,t)=>s+t.amount,0);
   const fbSpend       = spendTxns.filter(t=>(t.platform==="FACEBK"||t.platform==="FACEBOOK")&&t.confirmed==="OK"&&!t.duplicate).reduce((s,t)=>s+t.amount,0);
   const notYetCount   = spendTxns.filter(t=>t.confirmed==="Not Yet").length;
@@ -695,6 +697,9 @@ export default function BillingTrackerPage() {
     if (statusFilter==="OK")       return t.confirmed==="OK"&&t.status!=="Declined"&&!t.isDeposit;
     if (statusFilter==="Not Yet")  return t.confirmed==="Not Yet"&&t.status!=="Declined"&&!t.isDeposit;
     if (statusFilter==="Declined") return t.status==="Declined";
+    if (statusFilter==="Deposit")  return t.isDeposit;
+    if (statusFilter==="Cleared")  return t.status==="Cleared"&&!t.isDeposit;
+    if (statusFilter==="Unknown")  return t.status==="Unknown";
     return true;
   }).filter(t=>showDupes?true:!t.duplicate);
 
@@ -824,14 +829,21 @@ export default function BillingTrackerPage() {
       <div className="px-6 pb-8 flex gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-3">
-            <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-              <button onClick={()=>setStatusFilter("all")} className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${statusFilter==="all"?"bg-white text-gray-900 shadow-sm":"text-gray-400 hover:text-gray-600"}`}>Tout ({transactions.length})</button>
-              <button onClick={()=>setStatusFilter("OK")} className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${statusFilter==="OK"?"bg-white text-gray-900 shadow-sm":"text-gray-400 hover:text-gray-600"}`}>✅ OK ({spendTxns.filter(t=>t.confirmed==="OK").length})</button>
-              <button onClick={()=>setStatusFilter("Not Yet")} className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${statusFilter==="Not Yet"?"bg-white text-gray-900 shadow-sm":"text-gray-400 hover:text-gray-600"}`}>⏳ Not Yet ({notYetCount})</button>
-              <button onClick={()=>setStatusFilter("Declined")} className={`relative flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${statusFilter==="Declined"?"bg-white text-gray-900 shadow-sm":"text-gray-400 hover:text-gray-600"}`}>
-                ❌ Declined
-                {declinedCount>0&&<span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold transition-all ${statusFilter==="Declined"?"bg-red-500 text-white":"bg-red-100 text-red-600"}`}>{declinedCount}</span>}
-              </button>
+            <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
+              {([
+    {key:"all",     label:`Tout (${transactions.length})`},
+    {key:"OK",      label:`✅ OK (${spendTxns.filter(t=>t.confirmed==="OK").length})`},
+    {key:"Not Yet", label:`⏳ Not Yet (${notYetCount})`},
+    {key:"Declined",label:`❌ Declined (${declinedCount})`},
+    {key:"Deposit", label:`💰 Deposit (${transactions.filter(t=>t.isDeposit).length})`},
+    {key:"Cleared", label:`✓ Cleared (${transactions.filter(t=>t.status==="Cleared"&&!t.isDeposit).length})`},
+    {key:"Unknown", label:`? Unknown (${transactions.filter(t=>t.status==="Unknown").length})`},
+  ] as const).map(tab=>(
+    <button key={tab.key} onClick={()=>setStatusFilter(tab.key as any)}
+      className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${statusFilter===tab.key?"bg-white text-gray-900 shadow-sm":"text-gray-400 hover:text-gray-600"}`}>
+      {tab.label}
+    </button>
+  ))}
             </div>
             {transactions.length>0&&<button onClick={()=>{if(confirm("مسح كل البيانات؟"))setTransactions([]);}} className="text-xs text-gray-400 hover:text-red-500 transition-colors">مسح الكل</button>}
           </div>
@@ -857,7 +869,7 @@ export default function BillingTrackerPage() {
                   const info=PLATFORM_MAP[txn.platform]??PLATFORM_MAP["OTHER"];
                   if (editingId === txn.id) return <EditRow key={txn.id} txn={txn} onSave={saveTxn} onCancel={()=>setEditingId(null)}/>;
                   return (
-                    <tr key={txn.id} onClick={()=>setEditingId(txn.id)}
+                    <tr key={txn.id}
                       className={`border-b border-gray-50 transition-colors cursor-pointer ${txn.duplicate?"bg-orange-50/60 hover:bg-orange-50":txn.status==="Declined"?"bg-red-50/40 hover:bg-red-50/60":txn.isDeposit?"bg-emerald-50/40 hover:bg-emerald-50/60":"hover:bg-gray-50/50"}`}>
                       <td className="px-3 py-3">
                         <p className="text-xs text-gray-700 font-medium">{txn.date}</p>
@@ -890,10 +902,16 @@ export default function BillingTrackerPage() {
                           </select>}
                       </td>
                       <td className="px-3 py-3" onClick={e=>e.stopPropagation()}>
-                        <button onClick={()=>setTransactions(prev=>markDuplicates(prev.filter(t=>t.id!==txn.id)))}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                        </button>
+                        <div className="flex gap-1">
+                          <button onClick={()=>setEditingId(txn.id)}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-purple-500 hover:bg-purple-50 transition-all">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                          </button>
+                          <button onClick={()=>setTransactions(prev=>markDuplicates(prev.filter(t=>t.id!==txn.id)))}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
