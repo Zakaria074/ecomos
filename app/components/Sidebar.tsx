@@ -21,9 +21,8 @@ const ALL_NAV = [
   { href: "/dashboard/products",               label: "Products & Ad Spend",     icon: "📦" },
   { href: "/dashboard/research",               label: "Product Research",        icon: "🔍" },
   { href: "/dashboard/stock",                  label: "Stock",                   icon: "🏪" },
-  { href: "/dashboard/whatsapp",               label: "WhatsApp Automations",    icon: "💬" },
   { href: "/dashboard/billing",                label: "Billing Tracker",         icon: "💳" },
-  { href: "/dashboard/ai",                     label: "AI Assistant",            icon: "🤖" },
+  { href: "/dashboard/rapports",               label: "Rapports",                icon: "📋" },
 ];
 
 const AGENT_NAV = [
