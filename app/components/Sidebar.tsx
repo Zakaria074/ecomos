@@ -23,6 +23,7 @@ const ALL_NAV = [
   { href: "/dashboard/stock",                  label: "Stock",                   icon: "🏪" },
   { href: "/dashboard/billing",                label: "Billing Tracker",         icon: "💳" },
   { href: "/dashboard/rapports",               label: "Rapports",                icon: "📋" },
+  { href: "/dashboard/infos", label: "Infos", icon: "📌" },
 ];
 
 const AGENT_NAV = [
