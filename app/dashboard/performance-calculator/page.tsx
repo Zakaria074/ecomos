@@ -592,8 +592,12 @@ export default function PerformanceCalculatorPage() {
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 border-t-2 border-gray-200">
-                <td colSpan={5} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Total</td>
-                <td className="px-3 py-3"></td>
+<td colSpan={3} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Total</td>
+<td className="px-3 py-3 text-right text-xs font-bold text-gray-600">
+  {sorted.reduce((s, r) => s + (parseFloat(getInput(r.campaignName).livrees) || 0), 0).toLocaleString()}
+</td>
+<td className="px-3 py-3"></td>
+<td className="px-3 py-3"></td>
                 <td className="px-3 py-3 text-right text-xs font-bold text-blue-600">
                   ${sorted.reduce((s, r) => s + r.spend, 0).toFixed(2)}
                 </td>
