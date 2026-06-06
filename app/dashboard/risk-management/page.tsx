@@ -437,12 +437,13 @@ export default function RiskManagementPage() {
                 <th className="text-right px-3 py-3 font-medium cursor-pointer" onClick={() => handleSort("spend")}>Spend <SortArrow k="spend" /></th>
                 <th className="text-right px-3 py-3 font-medium cursor-pointer" onClick={() => handleSort("results")}>Results <SortArrow k="results" /></th>
                 <th className="text-right px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort("cpr")}>CPR <SortArrow k="cpr" /></th>
+                <th className="text-right px-3 py-3 font-medium">Total Profit</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-12 text-gray-400">
+                  <td colSpan={10} className="text-center py-12 text-gray-400">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-6 h-6 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
                       <span className="text-xs">Chargement...</span>
@@ -450,7 +451,7 @@ export default function RiskManagementPage() {
                   </td>
                 </tr>
               ) : sorted.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-12 text-gray-300 text-xs">Aucune campagne</td></tr>
+                <tr><td colSpan={10} className="text-center py-12 text-gray-300 text-xs">Aucune campagne</td></tr>
               ) : (
                 sorted.map((r, i) => {
                   const profit = calcProfit(r);
@@ -511,11 +512,39 @@ export default function RiskManagementPage() {
                           {r.cpr > 0 ? `$${r.cpr.toFixed(2)}` : "-"}
                         </span>
                       </td>
+                      <td className="px-3 py-2.5 text-right">
+  {profit !== null && livrees > 0 ? (
+    <span className={`text-xs font-black px-2 py-1 rounded-lg ${livrees * profit >= 0 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+      {(livrees * profit).toLocaleString()} DZD
+    </span>
+  ) : <span className="text-xs text-gray-300">—</span>}
+</td>
                     </tr>
                   );
                 })
               )}
             </tbody>
+            <tfoot>
+  <tr className="bg-gray-50 border-t-2 border-gray-200">
+    <td colSpan={4} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Total</td>
+    <td className="px-3 py-3"></td>
+    <td className="px-3 py-3"></td>
+    <td className="px-3 py-3 text-right text-xs font-bold text-blue-600">
+      ${sorted.reduce((s, r) => s + r.spend, 0).toFixed(2)}
+    </td>
+    <td className="px-3 py-3 text-right text-xs font-bold text-green-600">
+      {sorted.reduce((s, r) => s + r.results, 0)}
+    </td>
+    <td className="px-3 py-3"></td>
+    <td className="px-3 py-3 text-right text-sm font-black text-green-600">
+      {sorted.reduce((s, r) => {
+        const profit = calcProfit(r);
+        const livrees = Math.round(r.results * 0.42);
+        return s + (profit !== null && livrees > 0 ? livrees * profit : 0);
+      }, 0).toLocaleString()} DZD
+    </td>
+  </tr>
+</tfoot>
           </table>
         </div>
       </div>
